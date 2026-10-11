@@ -6,11 +6,16 @@
  *
  * 安全：只绑 127.0.0.1；只允许已启用插件；路径防穿越。
  */
-import { ipcMain } from 'electron';
+import { createRequire } from 'node:module';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { listInstalledPlugins, isPluginEnabled } from '../../plugins/index.js';
+
+// electron 特殊：其 index.js 导出字符串，须用 createRequire（见 P3a 手册 1.5；
+// 与本目录其它 IPC 模块一致——ESM 直连 import 会绕过测试对 createRequire 的打桩）。
+const require = createRequire(import.meta.url);
+const { ipcMain } = require('electron');
 
 interface ServeRoute {
   pluginId: string;
