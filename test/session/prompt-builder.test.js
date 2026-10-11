@@ -168,3 +168,124 @@ test('buildPrompt 不存在的模板文件走 default（未知 provider）', () 
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('buildPrompt isSubagent=true：过滤 runAgent 工具清单与 section（M-2）', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cuckoo-pb-'));
+  try {
+    const normal = pb.buildPrompt({ providerId: 'deepseek', selectedDir: tmp });
+    const sub = pb.buildPrompt({ providerId: 'deepseek', selectedDir: tmp, isSubagent: true });
+    // 工具清单条目（getFormattedJsApiForPrompt）：`runAgent(name, task)` — ...
+    const listEntry = '\u0060runAgent(name, task)\u0060 — ';
+    // 工具 section（getPromptSection）：使用 runAgent(name, task) 把任务委派给子代理。
+    const sectionText = '使用 runAgent(name, task) 把任务委派给子代理';
+    // 主窗口默认仍含 runAgent（回归保护，主窗口行为不变）
+    assert.ok(normal.prompt.includes(listEntry), '主窗口 prompt 应含 runAgent 工具清单条目');
+    assert.ok(normal.prompt.includes(sectionText), '主窗口 prompt 应含 runAgent section');
+    // 子代理 prompt 过滤掉 runAgent 的工具清单与 section
+    assert.ok(!sub.prompt.includes(listEntry), '子代理 prompt 不应含 runAgent 工具清单条目');
+    assert.ok(!sub.prompt.includes(sectionText), '子代理 prompt 不应含 runAgent section');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('buildPrompt isSubagent=true：MCP 章节全给（模板驱动，用户裁定）', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cuckoo-pb-'));
+  try {
+    const normal = pb.buildPrompt({ providerId: 'deepseek', selectedDir: tmp });
+    const sub = pb.buildPrompt({ providerId: 'deepseek', selectedDir: tmp, isSubagent: true });
+    assert.ok(normal.prompt.includes('## MCP 能力'), '主窗口 prompt 应含 MCP 章节');
+    assert.ok(sub.prompt.includes('## MCP 能力'), '子代理 prompt 也应含 MCP 章节（用户裁定 MCP 全给）');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('buildPrompt isSubagent=true：不注入 CUCKOO.md（回归保护）', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cuckoo-pb-'));
+  try {
+    const dir = path.join(tmp, '.cuckooCode');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'CUCKOO.md'), '主编协议污染内容XYZ', 'utf-8');
+    const sub = pb.buildPrompt({ providerId: 'deepseek', selectedDir: tmp, isSubagent: true });
+    assert.ok(!sub.prompt.includes('主编协议污染内容XYZ'), '子代理不应注入 CUCKOO.md');
+    assert.ok(!sub.prompt.includes('## 项目介绍'));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('loadTemplate isSubagent=true 回退 subagent-default.md（M-1）', () => {
+  const r = pb.loadTemplate('deepseek', true);
+  assert.ok(!r.error, r.error);
+  assert.ok(r.content.length > 0, '子代理模板内容不应为空');
+  assert.ok(r.path.endsWith('subagent-default.md'), r.path);
+});
+
+test('loadTemplate isSubagent=true 未知 providerId 也回退 subagent-default.md', () => {
+  const r = pb.loadTemplate('no-such-provider-xyz', true);
+  assert.ok(!r.error, r.error);
+  assert.ok(r.content.length > 0);
+  assert.ok(r.path.endsWith('subagent-default.md'), r.path);
+});
+
+test('loadTemplate isSubagent=false 保持主模板（M-1）', () => {
+  const known = pb.loadTemplate('deepseek', false);
+  assert.ok(known.path.endsWith('deepseek.md'), known.path);
+  const unknown = pb.loadTemplate('no-such-provider-xyz', false);
+  assert.ok(unknown.path.endsWith('default.md'), unknown.path);
+});
+
+test('subagent-default.md 内容约束：无人机对话表述（M-1）', () => {
+  const mdPath = path.join(pb.PROMPT_DIR, 'subagent-default.md');
+  assert.ok(fs.existsSync(mdPath), 'subagent-default.md 应存在');
+  const content = fs.readFileSync(mdPath, 'utf-8');
+  assert.ok(!content.includes('主动向用户提问'), '不应含「主动向用户提问」');
+  assert.ok(!content.includes('先给计划'), '不应含「先给计划」');
+  assert.ok(content.includes('无人值守'), '应含「无人值守」');
+});
+
+test('buildPrompt 主窗口注入工作流规则（WORKFLOW_RULES_SECTION）', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cuckoo-pb-'));
+  try {
+    const r = pb.buildPrompt({ providerId: 'deepseek', selectedDir: tmp });
+    assert.ok(!r.error, r.error);
+    assert.ok(r.prompt.includes('## 工作流规则（强制）'), '主窗口 prompt 应含工作流规则章节');
+    assert.ok(!r.prompt.includes('{{WORKFLOW_RULES_SECTION}}'), '占位符应已被替换');
+    // 不绑定具体文案：规则文件是用户可编辑的模板，标题可自定义。
+    // 只断言「文件内容确实被注入」（取文件首行标题作为指纹）。
+    const wfPath = path.join(process.cwd(), 'src', 'prompt', 'workflow-rules.md');
+    const firstHeading = fs.readFileSync(wfPath, 'utf-8')
+      .split(/\r?\n/).find((l) => l.startsWith('# '));
+    assert.ok(firstHeading, '规则文件应有 Markdown 标题');
+    assert.ok(r.prompt.includes(firstHeading.trim()), '应含规则文件内容（标题指纹）');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('buildPrompt isSubagent=true：不注入工作流规则（即使模板含占位符）', async () => {
+  // 有效性关键：必须走「含 {{WORKFLOW_RULES_SECTION}} 占位符」的模板。
+  // 子代理默认用 subagent-default.md（无占位符），那样断言无法捕获 isSubagent 抑制回归。
+  // 这里用 provider.getPromptTemplate 强制返回含占位符的模板，使占位符真实参与替换：
+  // 若 prompt-builder.ts L202 的 isSubagent 抑制被移除，readWorkflowRules() 会执行，
+  // 占位符被替换为规则内容 → 下列「子代理不含规则」断言必然变红（区分力判据）。
+  const { getProvider } = await import('../../src/providers/registry.js');
+  const p = getProvider('deepseek');
+  const orig = p.getPromptTemplate;
+  p.getPromptTemplate = () => 'TEMPLATE {{WORKFLOW_RULES_SECTION}} END';
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cuckoo-pb-'));
+  try {
+    const normal = pb.buildPrompt({ providerId: 'deepseek', selectedDir: tmp });
+    const sub = pb.buildPrompt({ providerId: 'deepseek', selectedDir: tmp, isSubagent: true });
+    assert.ok(sub.prompt.includes('TEMPLATE'), '子代理应使用含占位符的模板');
+    assert.ok(normal.prompt.includes('## 工作流规则（强制）'), '主窗口 prompt 应含工作流规则章节');
+    assert.ok(!normal.prompt.includes('{{WORKFLOW_RULES_SECTION}}'), '主窗口占位符应已被替换');
+    assert.ok(sub.prompt.includes('## 工作流规则（强制）'), '子代理 prompt 也应含工作流规则章节（模板驱动：占位符由 provider 模板声明）');
+    assert.ok(!sub.prompt.includes('{{WORKFLOW_RULES_SECTION}}'), '子代理占位符应已被替换为空');
+  } finally {
+    if (orig) p.getPromptTemplate = orig; else delete p.getPromptTemplate;
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+

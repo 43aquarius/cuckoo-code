@@ -1,5 +1,5 @@
 'use strict';
-import { test, afterEach } from 'vitest';
+import { test, afterEach, vi } from 'vitest';
 import assert from 'node:assert';
 import {
   startInterceptObserver,
@@ -8,7 +8,15 @@ import {
   onInterceptedResponse,
   onAiError,
   onTaskIdle,
+  setSubagentActive,
 } from '../../../src/bridge/intercept/observer.js';
+import * as chatInputMod from '../../../src/overlay/chat-input.js';
+
+// 部分模拟 chat-input：保留原实现，仅包装 sendMessageToChat 以便断言门禁提示
+vi.mock('../../../src/overlay/chat-input.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, sendMessageToChat: vi.fn(actual.sendMessageToChat) };
+});
 
 // 收集注册的监听器，测试后统一取消，避免模块级 Set 跨用例泄漏
 const offs = [];
@@ -253,3 +261,88 @@ test('onTaskIdle：空文本不触发', async () => {
   await processInterceptedResponse('');
   assert.strictEqual(idle, 0);
 });
+
+
+// ========== T2a 子代理工具调用门禁（块数 > 3 / 单块调用数 > 3 → 整轮不执行）==========
+// 门禁仅对子代理窗口生效（主窗口直接放行）；依赖模块级 isSubagentActive，
+// 必须用 setSubagentActive 显式开关，并在 afterEach 复位，避免跨用例状态泄漏。
+
+function mkBlock(calls) {
+  const lines = [];
+  for (let i = 0; i < calls; i++) lines.push('const v' + i + ' = await read("f' + i + '.txt");');
+  return '```cuckoo' + String.fromCharCode(10) + lines.join(String.fromCharCode(10)) + String.fromCharCode(10) + '```';
+}
+function mkReply(blockCount, callsPerBlock) {
+  return Array.from({ length: blockCount }, () => mkBlock(callsPerBlock)).join(String.fromCharCode(10, 10));
+}
+let executeJsSpy;
+
+function setupGateEnv() {
+  const mask = makeFakeMask();
+  setupGlobals({ 'cuckoo-tool-mask': mask });
+  executeJsSpy = vi.fn(async () => ({ success: true, output: 'ok' }));
+  globalThis.window.electronAPI.executeJs = executeJsSpy;
+  chatInputMod.sendMessageToChat.mockClear();
+  return mask;
+}
+
+function gateHints() {
+  return chatInputMod.sendMessageToChat.mock.calls
+    .map((c) => String(c[0]))
+    .filter((m) => /超过单次上限|超过单块上限/.test(m));
+}
+
+afterEach(() => {
+  // 状态隔离：复位子代理标识，避免跨用例污染（门禁依赖模块级 isSubagentActive）
+  setSubagentActive(false);
+});
+
+test('T2a 门禁：非子代理窗口 4 个 cuckoo 块照常执行', async () => {
+  setupGateEnv();
+  setSubagentActive(false);
+  await processInterceptedResponse(mkReply(4, 1), true);
+  assert.strictEqual(executeJsSpy.mock.calls.length, 4, '主窗口不受块数门禁，应执行 4 个块');
+  assert.strictEqual(gateHints().length, 0, '主窗口不应收到超限提示');
+});
+
+test('T2a 门禁：子代理块数超限（4 块）→ 不执行 + 提示含「超过单次上限 3 个」', async () => {
+  setupGateEnv();
+  setSubagentActive(true);
+  await processInterceptedResponse(mkReply(4, 1), true);
+  assert.strictEqual(executeJsSpy.mock.calls.length, 0, '块数超限应整轮不执行');
+  const hints = gateHints();
+  assert.strictEqual(hints.length, 1, '应恰好发送一条块数超限提示');
+  assert.ok(hints[0].includes('超过单次上限 3 个'), '提示应含块数上限文案，实际: ' + hints[0].slice(0, 80));
+});
+
+test('T2a 门禁：子代理单块调用数超限（1 块 4 个调用）→ 不执行 + 提示含「超过单块上限 3 个」', async () => {
+  setupGateEnv();
+  setSubagentActive(true);
+  await processInterceptedResponse(mkReply(1, 4), true);
+  assert.strictEqual(executeJsSpy.mock.calls.length, 0, '单块调用数超限应整轮不执行');
+  const hints = gateHints();
+  assert.strictEqual(hints.length, 1, '应恰好发送一条单块超限提示');
+  assert.ok(hints[0].includes('超过单块上限 3 个'), '提示应含单块上限文案，实际: ' + hints[0].slice(0, 80));
+});
+
+test('T2a 门禁：恰好 3 块 / 每块 3 调用 → 放行（> 判定非 >=）', async () => {
+  setupGateEnv();
+  setSubagentActive(true);
+  await processInterceptedResponse(mkReply(3, 3), true);
+  assert.strictEqual(gateHints().length, 0, '边界值应放行，不发超限提示');
+  // executeJs 以「整块代码」为单位调用（块内 await 不额外触发 executeJs），故 3 块 → 3 次
+  assert.strictEqual(executeJsSpy.mock.calls.length, 3, '3 个块应各执行一次');
+});
+
+test('T2a 门禁：setSubagentActive(false) 后门禁关闭（4 块不再拦）', async () => {
+  setupGateEnv();
+  setSubagentActive(true);
+  setSubagentActive(false);
+  await processInterceptedResponse(mkReply(4, 1), true);
+  assert.strictEqual(executeJsSpy.mock.calls.length, 4, '关闭标识后应放行 4 个块');
+  assert.strictEqual(gateHints().length, 0, '关闭标识后不应发超限提示');
+});
+
+// 代码观察：门禁提示中的「单次上限/单块上限」文案为硬编码数字（observer.ts L114/L126），
+// 若后续把 MAX_JS_BLOCKS_PER_REPLY / MAX_TOOLS_PER_BLOCK 改为可配置，测试断言需同步。
+
