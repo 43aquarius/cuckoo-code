@@ -87,6 +87,11 @@ export interface ShellAPI {
   openAgentFile?: (agentPath: string) => Promise<any>;
   renameAgent?: (agentPath: string, newName: string) => Promise<any>;
   deleteAgentFile?: (agentPath: string) => Promise<any>;
+  // 运行中子代理任务（T10：状态由主进程 push，getSubagentStatus 仅作进入 tab 初始拉取）
+  getSubagentStatus?: () => Promise<any>;
+  onSubagentStatus?: (cb: (data: { tasks: any[] }) => void) => void;
+  subagentAbort?: (windowId: number) => Promise<any>;
+  focusSubagentWindow?: (windowId: number) => Promise<any>;
   // MCP
   listMcpServers?: () => Promise<any>;
   enableMcpServer?: (name: string) => Promise<any>;

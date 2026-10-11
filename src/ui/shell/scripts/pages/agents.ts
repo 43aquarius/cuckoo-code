@@ -3,6 +3,7 @@
  */
 import { api, ckAlert, ckConfirm, escapeHtml, escapeAttr } from '../shared.js';
 import { addRecent } from '../recent.js';
+import { loadSubagents } from './subagents.js';
 
 export async function loadAgents(): Promise<void> {
   const listEl = document.getElementById('agent-list');
@@ -115,7 +116,11 @@ function closeAgentModal(): void {
 
 document.getElementById('agent-new')?.addEventListener('click', openAgentModal);
 document.getElementById('agent-cancel')?.addEventListener('click', closeAgentModal);
-document.getElementById('agent-refresh')?.addEventListener('click', loadAgents);
+// 刷新按钮同时刷新「代理定义」与「运行中」两个分组（后者由 pages/subagents.ts 渲染）
+document.getElementById('agent-refresh')?.addEventListener('click', () => {
+  void loadAgents();
+  void loadSubagents();
+});
 
 document.getElementById('agent-open-file')?.addEventListener('click', async () => {
   if (!agentEditPath || !api.openAgentFile) return;
