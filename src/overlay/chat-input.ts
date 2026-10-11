@@ -22,8 +22,18 @@ function getCurrentProvider(): any {
  * 生成随机等待时间（ms），范围由 state 配置（默认 2-4 秒）
  */
 function randomDelay(): number {
-  const min = typeof state.sendDelayMin === 'number' ? state.sendDelayMin : 2000;
-  const max = typeof state.sendDelayMax === 'number' ? state.sendDelayMax : 4000;
+  // 优先读 localStorage（主/子窗共享同一 partition 的 localStorage）——子窗未跑主窗 overlay 初始化，
+  // state.sendDelayMin/Max 会停在默认值（2-4s），导致子窗未继承主窗的发送延迟设置。故此处直接读 localStorage。
+  let min: number | undefined;
+  let max: number | undefined;
+  try {
+    const savedMin = localStorage.getItem('cuckoo-send-delay-min');
+    const savedMax = localStorage.getItem('cuckoo-send-delay-max');
+    if (savedMin !== null) { const v = parseInt(savedMin, 10); if (Number.isFinite(v) && v >= 0) min = v; }
+    if (savedMax !== null) { const v = parseInt(savedMax, 10); if (Number.isFinite(v) && v >= 0) max = v; }
+  } catch (_) { /* localStorage 不可用则回退 state/默认 */ }
+  if (min === undefined) min = typeof state.sendDelayMin === 'number' ? state.sendDelayMin : 2000;
+  if (max === undefined) max = typeof state.sendDelayMax === 'number' ? state.sendDelayMax : 4000;
   if (min >= max) return min;
   return Math.floor(Math.random() * (max - min)) + min;
 }
@@ -61,22 +71,24 @@ async function setInputContent(input: any, msg: string): Promise<boolean> {
       document.execCommand('selectAll', false, undefined);
       document.execCommand('delete', false, undefined);
 
-      // 分段 Paste：每段 ≤6000 字符，不会触发 ChatGPT 的附件行为，且每段都很快。
-      // 实测 12000 字符只需约 350ms。
+      // 分段 insertText：每段 ≤6000 字符，不会触发 ChatGPT 的附件行为，且每段都很快。
+      // 用 execCommand('insertText') 而非合成 ClipboardEvent('paste')：
+      // 后者是合成事件（isTrusted=false），ProseMirror（ChatGPT 等）会拒收，导致填入静默失败。
       const CHUNK_SIZE = 6000;
       for (let i = 0; i < msg.length; i += CHUNK_SIZE) {
         const chunk = msg.slice(i, i + CHUNK_SIZE);
-        const dt = new DataTransfer();
-        dt.setData('text/plain', chunk);
-        const pasteEvent = new ClipboardEvent('paste', {
-          bubbles: true,
-          cancelable: true,
-          clipboardData: dt,
-        });
-        input.dispatchEvent(pasteEvent);
+        document.execCommand('insertText', false, chunk);
         if (i + CHUNK_SIZE < msg.length) {
           await new Promise(resolve => setTimeout(resolve, 50));
         }
+      }
+      // 读回校验：编辑器可能拒绝写入（合成事件/受控组件），不能无条件返回 true。
+      // 以"去空白后长度 ≥ 期望的 90%"为准，容忍编辑器对空白/换行的处理差异。
+      const probe = msg.replace(/\s+/g, '');
+      const writtenCompact = getInputText(input).replace(/\s+/g, '');
+      if (!writtenCompact || writtenCompact.length < probe.length * 0.9) {
+        console.error('[Cuckoo Code] 输入框写入校验失败：期望约 ' + probe.length + ' 字，实际 ' + writtenCompact.length + ' 字');
+        return false;
       }
       return true;
     }
@@ -144,6 +156,7 @@ async function sendToChat(msg: string, tag?: string, fixedDelay?: number, afterS
   pendingSend = token;
   if (!(await setInputContent(input, msg))) {
     if (pendingSend === token) pendingSend = null;
+    console.error('[Cuckoo Code] 消息填入输入框失败，已放弃发送（tag=' + (tag || '') + '）');
     return false;
   }
   // 填充期间被取消：不发送（输入框内容保留）
@@ -520,6 +533,20 @@ ipcRenderer.on('initial-prompt', (_event: any, content: string) => {
       console.error('[' + new Date().toISOString() + '] [Cuckoo Code] initial-prompt 处理异常:', e.message);
     }
   }
+});
+
+// 监听子 Agent 提醒（subagent-reminder）：层3 空闲提醒、层5 force_deliver 提示。
+// 对齐 051 preload/dom/chat-input.js L396-404；sendToChat 签名 (msg, tag, fixedDelay)。
+ipcRenderer.on('subagent-reminder', (_event: any, payload: { message?: string } = {}) => {
+  const message = payload && payload.message;
+  if (!message || typeof message !== 'string') return;
+  const input = findInputArea();
+  if (!input) {
+    console.log('[Cuckoo Code] 子 Agent 提醒到达，但未找到输入框');
+    return;
+  }
+  console.log('[Cuckoo Code] 收到 subagent-reminder, 长度=' + message.length);
+  sendToChat(message, '子Agent提醒', 1500);
 });
 }
 

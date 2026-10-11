@@ -13,13 +13,17 @@ let electronAPI: any = {
   executeCommand: (command: any, id: any) => {
     return ipcRenderer.invoke('execute-command', { command, id });
   },
-  initProject: (projectDir: any, isCompaction: any, extraPrompt: any, noDialog: any, parentSessionId: any) => {
+  // 参数顺序以 086 为准（bridge/subagent.ts 依赖第 5/6 参为 prependPrompt/isSubagent），
+  // 0.8.11 的 parentSessionId 追加到末尾，避免破坏既有调用点。
+  initProject: (projectDir: any, isCompaction: any, extraPrompt: any, noDialog: any, prependPrompt: any, isSubagent: any, parentSessionId: any) => {
     return ipcRenderer.invoke('init-project', {
       skipPrompt: false,
       projectDir: projectDir || null,
       isCompaction: !!isCompaction,
       extraPrompt: extraPrompt || '',
       noDialog: !!noDialog,
+      prependPrompt: prependPrompt || '',
+      isSubagent: !!isSubagent,
       parentSessionId: parentSessionId || null,
     });
   },

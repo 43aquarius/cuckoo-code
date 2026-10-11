@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Cuckoo Code preload 入口
  * 原 preload.js 的全部逻辑拆分为本目录下的模块，此处负责组装与初始化，
  * 初始化时序与原文件保持一致。
@@ -13,6 +13,7 @@ import * as ui from '../overlay/panel.js';
 import * as projectDir from '../overlay/project-dir.js';
 import { bindEvents, refreshTokenForCurrentSession, setIsSubagentWindow, getAutoCompactConfig, applyAutoCompactConfig, triggerCompaction } from '../overlay/events.js';
 import * as chatInput from '../overlay/chat-input.js';
+import { state } from '../overlay/state.js';
 import * as settingsPanel from '../overlay/panels/settings.js';
 import { wireEvents } from '../overlay/events.js';
 import { getProviderByUrl } from '../providers/registry.js';
@@ -140,6 +141,8 @@ function handleUrlChanged(): void {
  */
 function init(): void {
   // 子代理窗口：注册完成判定（onInterceptedResponse 计数），但 overlay 照常初始化
+  // 顺序约束：必须早于 L197 的 startInterceptObserver()——initSubagentIfNeeded 内部
+  // 同步调用 observer.setSubagentActive(true)，置位早于回复监听注册，工具调用门禁才无竞态。
   const subCfg = initSubagentIfNeeded();
   if (subCfg) {
     // 子代理窗口在新对话页，但需要完整面板 → 抑制首页模式
@@ -208,6 +211,38 @@ function init(): void {
       } catch (err: any) {
         ipcRenderer.send('cuckoo-autocompact-result', { reqId, ok: false, error: err.message });
       }
+    });
+
+    // 启动时从主进程取全局 sendDelay（中心化）——子窗 partition 不同、localStorage 无主窗设置，
+    // 这里补取，避免子窗退化为默认 2-4s 被限流。
+    (async () => {
+      try {
+        const g = await ipcRenderer.invoke('get-global-send-delay');
+        if (g && typeof g.min === 'number' && typeof g.max === 'number') {
+          if (typeof state.sendDelayMin !== 'number' || typeof state.sendDelayMax !== 'number' ||
+              state.sendDelayMin === 2000 && state.sendDelayMax === 4000) {
+            state.sendDelayMin = g.min;
+            state.sendDelayMax = g.max;
+            try {
+              localStorage.setItem('cuckoo-send-delay-min', String(g.min));
+              localStorage.setItem('cuckoo-send-delay-max', String(g.max));
+            } catch (_) {}
+          }
+        }
+      } catch (_) { /* 主进程未注册/失败 → 保持默认 */ }
+    })();
+    // 实时接收主进程广播的 sendDelay 变更（Major-2）——主窗保存/恢复默认后，已开子窗无需重载即可更新
+    ipcRenderer.on('send-delay-changed', (_e: any, g: any) => {
+      try {
+        if (g && typeof g.min === 'number' && typeof g.max === 'number') {
+          state.sendDelayMin = g.min;
+          state.sendDelayMax = g.max;
+          try {
+            localStorage.setItem('cuckoo-send-delay-min', String(g.min));
+            localStorage.setItem('cuckoo-send-delay-max', String(g.max));
+          } catch (_) {}
+        }
+      } catch (_) { /* 忽略异常，保持现值 */ }
     });
     // 窗口组切换：主进程请求"全量分享当前会话"，回执 shareId
     ipcRenderer.on('cuckoo-switch-share', async (_e: any, { reqId }: any) => {
