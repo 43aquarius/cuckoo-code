@@ -2,11 +2,21 @@
 id: 016
 type: feat
 title: 子代理（Subagents，对齐 Claude Code）
-status: done
+status: superseded
 branch: feat/016-subagents
 created: 2026-09-26
-updated: 2026-09-26
+updated: 2026-09-30
+superseded_by: docs/plans/subagent-port-spec.md (T2 子代理副账号池)
 ---
+
+> **[已废弃 superseded · 2026-09-30]** 本文档「子代理共享主窗口 partition」的关键模型
+> 已被 **T2 子代理副账号池**（`docs/plans/subagent-port-spec.md`）取代：子代理改用
+> **副账号池的独立 partition**（池 = profile-list 中除主账号外的账号），与主窗口隔离，
+> 以规避同账号并发 429。**由此「子代理 token 自动计入主窗口累计」不再成立**
+> （不同 partition = 不同 localStorage）——用户 2026-09-30 裁定：**token 计入主窗口累计
+> 仅为附加收益，不再计入可接受**，不因此阻塞 T2。下文「关键模型（用户确认）」及
+> 验收标准中「共享 partition / 共享 localStorage / token 计入主窗口」条款均已失效，
+> 保留原文仅作历史记录。
 
 ## 背景
 
@@ -15,7 +25,11 @@ updated: 2026-09-26
 1. 上下文隔离（大任务不撑爆主对话）
 2. 缓解卡顿（主对话上下文越长，DeepSeek 页面越卡——见 backlog「长对话卡顿」）
 
-## 关键模型（用户确认）
+## 关键模型（用户确认）〔已被 T2 取代，见文首说明〕
+
+> ⚠ 以下为 016 原始模型，T2 已改为「副账号池独立 partition」，本节仅作历史记录。
+> 现行模型见 `docs/plans/subagent-port-spec.md`：子代理使用副账号池账号的独立 partition，
+> token 不再计入主窗口累计（用户裁定可接受）。
 
 **窗口 = 标签页，partition = 用户**。主 agent 和 subagent 是**同一用户的两个标签页**：
 - 共享 partition（免登录）
@@ -52,7 +66,7 @@ await runAgent("code-reviewer", "审查 src/session/compaction.ts")
 ```
 主对话 AI 调 runAgent
    → IPC 到主进程
-   ① 创建子代理窗口（复用主窗口 profile 的 partition → 免登录）
+   ① 创建子代理窗口（复用【副账号池账号】的 partition → 独立登录态，T2 起）
    ② 导航到新对话
    ③ 注入代理系统提示 + 任务
    ④ 等子代理跑完（无工具调用 = 完成；超时兜底）
@@ -73,7 +87,7 @@ await runAgent("code-reviewer", "审查 src/session/compaction.ts")
 ## 分阶段
 
 - [x] P2：代理定义扫描（`src/agents/`，仿 `src/skills/`）
-- [x] P3：子代理窗口创建（复用 partition）
+- [x] P3：子代理窗口创建（复用 partition）〔T2 起改为复用副账号池账号 partition〕
 - [x] P4：`runAgent` 工具 + 完成判定 + 回传
 - [x] P5：工具系统提示注入 + 防递归（UI 显示留后续）
 
@@ -81,8 +95,8 @@ await runAgent("code-reviewer", "审查 src/session/compaction.ts")
 
 - [x] 能扫描项目级/用户级代理
 - [x] `runAgent` 能开子代理窗口、跑完、回传摘要（真机：1+1 → "2"）
-- [x] 子代理免登录（共享 partition）
-- [x] 子代理 token 计入主窗口累计（共享 localStorage，天然）
+- [~] ~~子代理免登录（共享 partition）~~ → 已改为副账号池独立 partition（T2）
+- [~] ~~子代理 token 计入主窗口累计（共享 localStorage，天然）~~ → T2 后不再计入（用户裁定可接受）
 - [x] 子代理不能调 `runAgent`（防递归）
 - [x] typecheck / test / lint / compile
 - [x] 真机验证
