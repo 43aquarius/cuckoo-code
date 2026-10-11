@@ -23,9 +23,12 @@ const PROMPT_DIR = resolveSrc('prompt');
 /**
  * 读取平台提示词模板。
  * 优先级：1) provider.getPromptTemplate()  2) src/prompt/{id}.md  3) src/prompt/default.md
+ * 子代理（isSubagent=true）用独立模板：src/prompt/subagent-{id}.md → src/prompt/subagent-default.md，
+ * 避免主模板的"人机对话"段（"先给计划""主动向用户提问""先提澄清性问题"）污染无人值守行为。
+ * 对齐 051 project-context.js L60-77。
  * @returns { content, path }，失败时 content 为空串并带 message
  */
-function loadTemplate(providerId: string): { content: string; path: string; error?: string } {
+function loadTemplate(providerId: string, isSubagent = false): { content: string; path: string; error?: string } {
   const provider = getProvider(providerId);
   let templateContent = '';
   let templatePath = '';
@@ -43,7 +46,9 @@ function loadTemplate(providerId: string): { content: string; path: string; erro
   }
 
   if (!templateContent && providerId) {
-    const candidate = path.join(PROMPT_DIR, providerId + '.md');
+    // subagent-{id}.md 候选为 051 机制移植预留：当前 src/prompt/ 下无 subagent-{provider}.md
+    // 文件，故子代理会回退 subagent-default.md；未来若补子模板文件该分支自动生效。
+    const candidate = path.join(PROMPT_DIR, (isSubagent ? 'subagent-' : '') + providerId + '.md');
     if (fs.existsSync(candidate)) templatePath = candidate;
   }
 
@@ -56,7 +61,8 @@ function loadTemplate(providerId: string): { content: string; path: string; erro
   }
 
   if (!templateContent) {
-    templatePath = path.join(PROMPT_DIR, 'default.md');
+    // 子代理模板缺失时退回 subagent-default.md（仍避开主模板的人机对话段）
+    templatePath = path.join(PROMPT_DIR, isSubagent ? 'subagent-default.md' : 'default.md');
     try {
       templateContent = fs.readFileSync(templatePath, 'utf-8');
       console.warn('[Cuckoo Code] 未找到平台模板，使用默认模板:', templatePath);
@@ -66,6 +72,23 @@ function loadTemplate(providerId: string): { content: string; path: string; erro
   }
 
   return { content: templateContent, path: templatePath };
+}
+
+/**
+ * 读取通用工作流规则（src/prompt/workflow-rules.md），无则返回空串。
+ * 与 CUCKOO.md / MCP 章节同逻辑：主 Agent 注入、子 Agent 抑制。
+ * 读失败不阻断初始化，仅记录错误。
+ */
+function readWorkflowRules(): string {
+  const rulesPath = path.join(PROMPT_DIR, 'workflow-rules.md');
+  try {
+    const content = fs.readFileSync(rulesPath, 'utf-8');
+    console.log('[Cuckoo Code] 已读取工作流规则:', rulesPath);
+    return content;
+  } catch (err: any) {
+    console.error('[Cuckoo Code] 读取工作流规则失败:', err.message);
+    return '';
+  }
 }
 
 /** 生成平台信息章节（OS/arch/命令差异） */
@@ -137,13 +160,20 @@ function readProjectIntro(selectedDir: string): string {
 
 /**
  * 组装完整的系统提示词。
- * @param opts { providerId, selectedDir, isCompaction }
+ * @param opts { providerId, selectedDir, isCompaction, isSubagent }
+ *   isSubagent：子代理窗口——不注入 CUCKOO.md（主编项目协议会污染子代理身份），
+ *   对齐 0.5.1 project-context.js buildPrompt 第 5 参（docs/plans/subagent-port-spec.md）。
  * @returns { prompt, error? }，error 存在时 prompt 为空
  */
-function buildPrompt(opts: { providerId: string; selectedDir: string; isCompaction?: boolean }): { prompt: string; error?: string } {
-  const { providerId, selectedDir, isCompaction } = opts;
+function buildPrompt(opts: { providerId: string; selectedDir: string; isCompaction?: boolean; isSubagent?: boolean }): { prompt: string; error?: string } {
+  const { providerId, selectedDir, isCompaction, isSubagent } = opts;
+  // 子代理（M-2）：过滤 runAgent 工具（子代理不能再派子代理，防递归）。
+  // 身份隔离靠「模板驱动」——子模板 subagent-default.md 只声明它需要的占位符，
+  // 主 Agent 专属章节（SKILLS/AGENTS/PROJECT_INTRO/PROJECT_RULES/WORKFLOW_RULES）在子模板中
+  // 不存在对应占位符，split/join 自然为空，无需维护抑制清单。MCP 章节用户裁定「全给」。
+  const excludeTools = isSubagent ? ['runAgent'] : null;
 
-  const tpl = loadTemplate(providerId);
+  const tpl = loadTemplate(providerId, !!isSubagent);
   if (tpl.error) return { prompt: '', error: tpl.error };
   console.log('[Cuckoo Code] 已读取提示词模板:', tpl.path);
 
@@ -156,14 +186,15 @@ function buildPrompt(opts: { providerId: string; selectedDir: string; isCompacti
     console.error('[Cuckoo Code] 读取 cuckoo-tools.d.ts 失败:', resolveToolSpec());
   }
 
-  const toolsDescription = toolRegistry.getFormattedJsApiForPrompt();
+  // 086：子代理过滤 runAgent（防递归）→ excludeTools 透传两个 getter
+  const toolsDescription = toolRegistry.getFormattedJsApiForPrompt(excludeTools);
   // C4：DSH 插件注册的提示词段（与工具 section 合并）
   let dshSections = '';
   try {
     const secs = getDshPromptSections();
     if (secs.length > 0) dshSections = secs.map((s) => s.text).join('\n\n');
   } catch (_) { /* ignore */ }
-  const toolSections = toolRegistry.getFormattedPromptSections();
+  const toolSections = toolRegistry.getFormattedPromptSections(excludeTools);
   const promptSections = dshSections ? (toolSections + '\n\n' + dshSections) : toolSections;
 
   // 后台异步连接已启用的 MCP server，不阻塞初始化（按当前项目）
@@ -171,8 +202,12 @@ function buildPrompt(opts: { providerId: string; selectedDir: string; isCompacti
     console.error('[MCP] 初始化时连接失败:', err.message);
   });
 
+  // MCP 章节：主 Agent 与子 Agent 均注入（用户裁定「MCP 全给」）。
+  // 身份隔离靠「模板驱动」——子模板只声明它要的占位符，未声明者 split/join 自然为空。
   const mcpSection = buildMcpSection(selectedDir);
   const platformInfo = buildPlatformInfo();
+  // 子代理走独立模板（subagent-default.md 无 {{PROJECT_INTRO_SECTION}} 占位符），
+  // 占位符不声明即不填充，天然无污染；主 Agent 模板保留该占位符正常注入。
   const projectIntro = readProjectIntro(selectedDir);
   const projectIntroSection = projectIntro ? '---\n## 项目介绍\n' + projectIntro : '';
   // 已安装插件贡献的扫描根。
@@ -187,7 +222,11 @@ function buildPrompt(opts: { providerId: string; selectedDir: string; isCompacti
   const skillsSection = buildSkillsSection(scanSkills(selectedDir, pluginRoots.skillDirs));
   const agentsSection = buildAgentsSection(scanAgents(selectedDir, pluginRoots.agentDirs));
   // 无 paths 的规则：始终注入（「## 项目规则」章节）
+  // 086：插件贡献规则根（pluginRoots.ruleDirs）与 0.8.11 一致
   const rulesSection = buildUnscopedRulesSection(getUnscopedRules(scanRules(selectedDir, pluginRoots.ruleDirs)));
+  // 工作流规则：子模板无 {{WORKFLOW_RULES_SECTION}} 占位符，自然不注入（模板驱动，无需抑制判断）
+  const workflowRules = readWorkflowRules();
+  const workflowRulesSection = workflowRules ? '## 工作流规则（强制）\n\n' + workflowRules : '';
 
   const placeholders: Record<string, string> = {
     '{{TOOL_API_TYPES}}': toolApiTypes,
@@ -200,6 +239,7 @@ function buildPrompt(opts: { providerId: string; selectedDir: string; isCompacti
     '{{SKILLS_SECTION}}': skillsSection,
     '{{AGENTS_SECTION}}': agentsSection,
     '{{PROJECT_RULES_SECTION}}': rulesSection,
+    '{{WORKFLOW_RULES_SECTION}}': workflowRulesSection,
   };
   let combined = tpl.content;
   for (const [key, value] of Object.entries(placeholders)) {

@@ -190,6 +190,8 @@ log(r);
 
 {{PROJECT_RULES_SECTION}}
 
+{{WORKFLOW_RULES_SECTION}}
+
 ---
 
 ## 当前项目目录
