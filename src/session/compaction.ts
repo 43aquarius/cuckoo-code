@@ -29,6 +29,17 @@ const SUMMARY_INSTRUCTION =
   '已完成的结论和未完成的事项，用中文，一次性输出全部内容，' +
   '直接输出摘要，不要输出其他解释。';
 
+// 压缩交接提示（2026-10-01）：压缩后新会话只有摘要上下文，AI 会盲目信任它。
+//   要求 AI 主动读文件补全项目/任务上下文，避免基于残缺摘要行动。用户诉求。
+const CONTEXT_HANDOFF_INSTRUCTION =
+  '【上下文交接提示】你当前看到的对话是上一轮会话经压缩后的摘要，**并非完整上下文**——' +
+  '摘要可能丢失细节、假设、未落盘的决策。**不要盲目相信你当前的上下文。**\n\n' +
+  '请立即主动补全上下文：\n' +
+  '1. 读取项目文档/代码，了解项目现状与进行中的任务（如 spec、README、任务清单、最近改动的文件）；\n' +
+  '2. 核实摘要中的关键结论在文件/代码里是否真实成立（不轻信摘要）；\n' +
+  '3. 明确当前任务进度与下一步。\n\n' +
+  '补全后，最后单独输出一句：**上下文交接已完成**。';
+
 const COMPACT_URL_FLAG = 'cuckoo-compact';
 const COMPACT_DIR_KEY = 'cuckoo-compact-project-dir';
 const PENDING_INIT_KEY = 'cuckoo-compact-pending-init';
@@ -352,11 +363,21 @@ function checkPendingInit(): void {
   let parentSessionId = null;
   try { parentSessionId = localStorage.getItem('cuckoo-compact-parent-session'); } catch (_) {}
   console.log('[Cuckoo Compact] 检测到压缩后待初始化，3 秒后执行；项目目录=' + (projectDir || '(无)') + '，压缩前会话=' + (parentSessionId || '(无)'));
-  setTimeout(() => {
+  setTimeout(async () => {
     try {
-      (window as any).electronAPI.initProject(projectDir || null, true, '', false, parentSessionId);
+      // 参数顺序：(projectDir, isCompaction, extraPrompt, noDialog, prependPrompt, isSubagent, parentSessionId)
+      await (window as any).electronAPI.initProject(projectDir || null, true, '', false, '', false, parentSessionId);
     } catch (err) {
       console.error('[Cuckoo Compact] 压缩后初始化失败:', err);
+    }
+    // 压缩交接：上下文已被摘要截断，注入交接提示让 AI 主动补全上下文
+    // （用户诉求 2026-10-01：压缩后 AI 不知情，盲目相信摘要上下文；要求它主动读文件补全 + 报告完成）
+    try {
+      await new Promise((r) => setTimeout(r, 3000)); // 等首条提示发完
+      sendToChat(CONTEXT_HANDOFF_INSTRUCTION, '压缩-交接', 300);
+      console.log('[Cuckoo Compact] 已注入上下文交接提示');
+    } catch (err) {
+      console.error('[Cuckoo Compact] 交接提示发送失败:', err);
     }
   }, 3000);
 }
