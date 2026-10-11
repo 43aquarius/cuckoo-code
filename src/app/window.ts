@@ -9,8 +9,8 @@ interface WindowContext {
   profileId: any;
   providerId: any;
   sessionStore: any;
-  /** 是否子代理窗口（子代理与父窗口共用 profileId，靠此标志区分） */
-  isSubagent?: boolean;
+  /** 是否子代理窗口（由 profileData.isSubagent 注入；统一子代理判定机制，见 MI-5） */
+  isSubagent: boolean;
   /** 插件覆盖层视图（透明置顶，插件 UI 住这里） */
   overlayView?: any;
   /** 确保覆盖层创建（懒加载） */

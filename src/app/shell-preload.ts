@@ -123,6 +123,15 @@ const shellAPI = {
   onPlatformMode: (cb: (data: any) => void) => {
     ipcRenderer.on('shell-platform-mode', (_e: any, data: any) => cb(data));
   },
+  // ========== 子代理 ==========
+  // T10 二次修复：状态改为主进程 push（对齐 051 main/index.js L350-360），
+  // getSubagentStatus 保留为「进入 tab 时初始拉取」的兜底，不再用于轮询。
+  getSubagentStatus: () => ipcRenderer.invoke('get-subagent-status'),
+  onSubagentStatus: (cb: (data: { tasks: any[] }) => void) => {
+    ipcRenderer.on('subagent-status', (_e: any, data: any) => cb(data));
+  },
+  subagentAbort: (windowId: number) => ipcRenderer.invoke('subagent-abort', { windowId }),
+  focusSubagentWindow: (windowId: number) => ipcRenderer.invoke('focus-subagent-window', { windowId }),
   onSessionsChanged: (cb: () => void) => {
     ipcRenderer.on('shell-sessions-changed', () => cb());
   },
