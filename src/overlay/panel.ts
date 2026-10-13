@@ -179,38 +179,12 @@ function setTaskStatus(running: boolean): void {
 }
 
 /**
- * 显示工具调用遮罩（执行工具期间阻止用户操作）
+ * 显示工具调用遮罩（工具执行中提示 + 停止按钮；不拦截页面事件）
  * @param onCancel 传入时显示「停止」按钮（等待发送阶段用），点击触发该回调
  */
-// 遮罩期间：捕获阶段拦截"指向页面（非遮罩盒子）"的指针事件
-let maskBlockHandler: any = null;
-function enableMaskBlock(): void {
-  if (maskBlockHandler) return;
-  if (typeof document.addEventListener !== 'function') return; // 测试环境无此方法
-  const box = document.querySelector('#cuckoo-tool-mask .cuckoo-tool-mask-box');
-  maskBlockHandler = (e: any) => {
-    // 遮罩盒子内部（如"停止"按钮）允许交互
-    if (box && box.contains(e.target)) return;
-    e.stopPropagation();
-    e.preventDefault();
-  };
-  ['mousedown', 'mouseup', 'click', 'dblclick', 'contextmenu', 'pointerdown', 'pointerup'].forEach((t) =>
-    document.addEventListener(t, maskBlockHandler, true)
-  );
-}
-function disableMaskBlock(): void {
-  if (!maskBlockHandler) return;
-  if (typeof document.removeEventListener !== 'function') return;
-  ['mousedown', 'mouseup', 'click', 'dblclick', 'contextmenu', 'pointerdown', 'pointerup'].forEach((t) =>
-    document.removeEventListener(t, maskBlockHandler, true)
-  );
-  maskBlockHandler = null;
-}
-
 function showToolMask(onCancel?: () => void): void {
   const el = document.getElementById('cuckoo-tool-mask');
   if (el) el.classList.remove('cuckoo-hidden');
-  enableMaskBlock();
   const btn = document.getElementById('cuckoo-tool-mask-cancel') as any;
   if (btn) {
     if (onCancel) {
@@ -231,7 +205,6 @@ function showToolMask(onCancel?: () => void): void {
 function hideToolMask(): void {
   const el = document.getElementById('cuckoo-tool-mask');
   if (el) el.classList.add('cuckoo-hidden');
-  disableMaskBlock();
   const btn = document.getElementById('cuckoo-tool-mask-cancel') as any;
   if (btn) { btn.classList.add('cuckoo-hidden'); btn.onclick = null; }
 }

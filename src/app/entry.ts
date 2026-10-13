@@ -601,6 +601,23 @@ function createWindow(profile: any) {
     windowState.removeWindow(mainWindow.id);
     // 释放该窗口持有的 MCP 连接引用 + 清理自动连记录
     try { mcpClient.forgetWindow(mainWindow.id); } catch (_) {}
+    // 【修复渲染进程泄漏】本窗为「壳 BrowserWindow + AI 页 WebContentsView(+懒加载 harnessView)」双层结构。
+    //   win.close() 只销毁壳窗口的 webContents；挂在 contentView 上的子 view 独立持有渲染进程，
+    //   不会被连带销毁 → 每关一个窗口留下一个孤儿渲染进程（实测 120 任务 = 120 孤儿 + 275MB）。
+    //   收口：显式 removeChildView（从壳摘除）+ webContents.close()（真正释放渲染进程）。
+    //   次序：先摘除（须壳未销毁）再 close；异常吞掉，不阻断后续清理。
+    try {
+      if (!mainWindow.isDestroyed() && mainWindow.contentView) {
+        if (view) mainWindow.contentView.removeChildView(view);
+        if (harnessView) mainWindow.contentView.removeChildView(harnessView);
+      }
+    } catch (_) { /* ignore */ }
+    for (const v of [view, harnessView]) {
+      try {
+        const wc = v && v.webContents;
+        if (wc && !wc.isDestroyed()) wc.close();
+      } catch (_) { /* ignore */ }
+    }
   });
 
   return mainWindow.id;

@@ -35,17 +35,22 @@ function sleep(ms: number): Promise<void> {
 /**
  * 执行 JS 代码块，遇到"代码不完整"错误时自动重试。
  * 拦截模式下文本已完整（finished），无需重新提取，简单重试执行即可。
+ * @param shouldCancel 取消判定；返回 true 时停止执行后续代码块（已进入执行的块不中断）
+ * @returns 已执行块的结果（取消时为已完成的那些块）
  */
-async function executeJsBlocksWithRetry(blocks: string[]): Promise<any[]> {
+async function executeJsBlocksWithRetry(blocks: string[], shouldCancel?: () => boolean): Promise<any[]> {
   // 工具开始（每个代码块一次）
   for (const code of blocks) emitToolCall({ phase: 'start', code });
   let results: any[] = [];
   for (let attempt = 0; attempt <= MAX_JS_RETRY; attempt++) {
     results = [];
     for (const code of blocks) {
+      // 用户已取消：不再执行后续代码块，仅保留已执行块的结果
+      if (shouldCancel && shouldCancel()) break;
       const r = await handleJsToolScript(code);
       if (r) results.push(r);
     }
+    if (shouldCancel && shouldCancel()) break;
     const hasIncompleteFailure = results.some(
       (item) => item && item.result && !item.result.success && looksLikeIncompleteCodeError(item.result.error)
     );
@@ -84,26 +89,33 @@ async function processInterceptedResponse(text: string, force?: boolean): Promis
   if (jsBlocks.length > 0) {
     console.log('[Cuckoo Code][拦截] 检测到 JS 工具代码块（' + jsBlocks.length + ' 个），开始执行');
     formatHintCount = 0;
-    // 从检测到工具调用到结果发送完成，全程遮盖页面，禁止用户额外操作
-    showToolMask();
+    // 从检测到工具调用到结果发送完成，全程遮盖页面，禁止用户额外操作；
+    // 工具执行期间同样显示「停止」按钮，点击可取消（长任务可中止）
+    let cancelled = false;
+    const onCancel = () => {
+      cancelled = true;
+      cancelPendingSend();
+      hideToolMask();
+    };
+    showToolMask(onCancel);
     let results: any[] = [];
     try {
-      results = await executeJsBlocksWithRetry(jsBlocks);
+      results = await executeJsBlocksWithRetry(jsBlocks, () => cancelled);
     } catch (err) {
       hideToolMask();
       throw err;
+    }
+    // 用户已取消：丢弃执行结果，不再回传
+    if (cancelled) {
+      hideToolMask();
+      return;
     }
     if (results.length === 0) {
       hideToolMask();
       return;
     }
-    // 等待发送阶段：遮罩上显示「停止」按钮，点击可取消回传
-    let cancelled = false;
-    showToolMask(() => {
-      cancelled = true;
-      cancelPendingSend();
-      hideToolMask();
-    });
+    // 等待发送阶段：遮罩保持「停止」按钮（onCancel 复用），点击可取消回传
+    showToolMask(onCancel);
     if (abortRequested) { abortRequested = false; hideToolMask(); console.log('[Cuckoo Code][拦截] 已请求中止，不回传工具结果'); return; }
     // afterSent 在"结果已发出"时触发隐藏；发送失败（找不到输入框等）则立即隐藏兜底
     const sent = await sendCombinedJsResultsToChat(results, hideToolMask);

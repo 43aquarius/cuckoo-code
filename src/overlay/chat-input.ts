@@ -61,22 +61,24 @@ async function setInputContent(input: any, msg: string): Promise<boolean> {
       document.execCommand('selectAll', false, undefined);
       document.execCommand('delete', false, undefined);
 
-      // 分段 Paste：每段 ≤6000 字符，不会触发 ChatGPT 的附件行为，且每段都很快。
-      // 实测 12000 字符只需约 350ms。
+      // 分段 insertText：每段 ≤6000 字符，不会触发 ChatGPT 的附件行为，且每段都很快。
+      // 用 execCommand('insertText') 而非合成 ClipboardEvent('paste')：
+      // 后者是合成事件（isTrusted=false），ProseMirror（ChatGPT 等）会拒收，导致填入静默失败。
       const CHUNK_SIZE = 6000;
       for (let i = 0; i < msg.length; i += CHUNK_SIZE) {
         const chunk = msg.slice(i, i + CHUNK_SIZE);
-        const dt = new DataTransfer();
-        dt.setData('text/plain', chunk);
-        const pasteEvent = new ClipboardEvent('paste', {
-          bubbles: true,
-          cancelable: true,
-          clipboardData: dt,
-        });
-        input.dispatchEvent(pasteEvent);
+        document.execCommand('insertText', false, chunk);
         if (i + CHUNK_SIZE < msg.length) {
           await new Promise(resolve => setTimeout(resolve, 50));
         }
+      }
+      // 读回校验：编辑器可能拒绝写入（合成事件/受控组件），不能无条件返回 true。
+      // 以"去空白后长度 ≥ 期望的 90%"为准，容忍编辑器对空白/换行的处理差异。
+      const probe = msg.replace(/\s+/g, '');
+      const writtenCompact = getInputText(input).replace(/\s+/g, '');
+      if (!writtenCompact || writtenCompact.length < probe.length * 0.9) {
+        console.error('[Cuckoo Code] 输入框写入校验失败：期望约 ' + probe.length + ' 字，实际 ' + writtenCompact.length + ' 字');
+        return false;
       }
       return true;
     }
@@ -144,6 +146,7 @@ async function sendToChat(msg: string, tag?: string, fixedDelay?: number, afterS
   pendingSend = token;
   if (!(await setInputContent(input, msg))) {
     if (pendingSend === token) pendingSend = null;
+    console.error('[Cuckoo Code] 消息填入输入框失败，已放弃发送（tag=' + (tag || '') + '）');
     return false;
   }
   // 填充期间被取消：不发送（输入框内容保留）

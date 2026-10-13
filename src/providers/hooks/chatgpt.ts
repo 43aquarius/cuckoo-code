@@ -166,6 +166,12 @@ function install(): void {
     // 仅当 part 标记 reasoning / thoughts 时才有值（例如部分推理模型）。
     var thinkText = '';
     var finished = false;
+    // 「整轮结束」信号（与 finished="某条消息完成" 区分）：
+    // ChatGPT 会在**同一条流**里先后下发多条 assistant 消息（实测 3 条：含块 → 纯文字说明 → 含块）。
+    // 只有 message.end_turn === true 才表示这一轮真的结束，此时才允许立即派发；
+    // 否则要等后续消息（流关闭兜底）。若在"某条消息 finished"就锁死派发，
+    // 后续含 cuckoo 块的消息会被永久丢弃 → 表现为「输出了块却判为正常文本」。
+    var endTurn = false;
     // 服务端视角的用户停止：status = interrupted 或 metadata.stop_reason = user_cancelled
     var serverStopped = false;
     // 服务端判定失败：status = failed / errored
@@ -228,6 +234,21 @@ function install(): void {
       if (low.indexOf('cancel') !== -1 || low.indexOf('interrupt') !== -1) serverStopped = true;
     }
 
+    /**
+     * 覆盖正文，但防止「丢块」：
+     * 实测同一轮里 GPT 会先给出含 cuckoo 块的消息，随后被纯文字消息覆盖。
+     * 若直接覆盖，已见到的工具块会被顶掉 → 本轮不执行任何工具。
+     * 规则：新内容不含 cuckoo 块、而当前正文含块、且新内容不更长时 → 保留现有正文。
+     */
+    function overwriteText(next) {
+      var FENCE_CUCKOO = '```' + 'cuckoo';
+      var nextS = String(next || '');
+      var oldHasBlock = text.indexOf(FENCE_CUCKOO) !== -1;
+      var newHasBlock = nextS.indexOf(FENCE_CUCKOO) !== -1;
+      if (oldHasBlock && !newHasBlock && nextS.length <= text.length) return;
+      text = nextS;
+    }
+
     function partKind(p) {
       if (!p || typeof p !== 'object') return 'text';
       var ct = String(p.content_type || p.type || '').toLowerCase();
@@ -263,11 +284,13 @@ function install(): void {
       //    登录态流里 model_editable_context / model_set_context 等内部帧 role 也是 assistant、
       //    且带 status='finished_successfully'，若采信会在正文到达前就 finished=true → 空文本 → error。
       if (snap === null) return;
-      text = snap.text;
+      var newText = String(snap.text || '');
+      // 防"丢块"覆盖（规则见 overwriteText 注释）
+      overwriteText(newText);
       if (snap.think) thinkText = snap.think;
       applyStatus(m.status);
       if (m.metadata) applyStopReason(m.metadata.stop_reason);
-      if (m.end_turn === true) finished = true;
+      if (m.end_turn === true) { finished = true; endTurn = true; }
     }
 
     function applyOp(node) {
@@ -302,11 +325,15 @@ function install(): void {
       // 3) 路径操作
       if (typeof node.p === 'string' && node.p !== '') {
         if (node.p === '/message/status') { applyStatus(node.v); return; }
-        if (node.p === '/message/end_turn' && node.v === true) { finished = true; return; }
+        if (node.p === '/message/end_turn' && node.v === true) { finished = true; endTurn = true; return; }
         if (/\/message\/content\/parts\/\d+$/.test(node.p)) {
           if (typeof node.v === 'string') {
-            if (node.o === 'append' || node.o === 'add') text += node.v;
-            else text = node.v;
+            if (node.o === 'append' || node.o === 'add') {
+              text += node.v;
+            } else {
+              // ⚠️ 防丢块：覆盖式写入若不含 cuckoo 块、而当前正文含块，则不覆盖（见 handleMessage 同款保护）
+              overwriteText(node.v);
+            }
           } else if (node.v && typeof node.v === 'object' && typeof node.v.text === 'string') {
             if (partKind(node.v) === 'think') thinkText += node.v.text;
             else text += node.v.text;
@@ -326,10 +353,13 @@ function install(): void {
 
     return {
       consume: function (parsed) { applyOp(parsed); },
-      markDone: function () { finished = true; },
+      // SSE 的 [DONE] 是明确终态 → 同时置 finished 与 endTurn（允许立即派发）
+      markDone: function () { finished = true; endTurn = true; },
       get text() { return text; },
       get think() { return thinkText; },
       get finished() { return finished; },
+      // 「整轮结束」：仅它允许立即派发（见 feed 注释）；流关闭时由 pump 兜底派发
+      get endTurn() { return endTurn; },
       get failed() { return failed; },
       get serverStopped() { return serverStopped; },
       get tokenUsage() { return tokenUsage; },
@@ -338,6 +368,7 @@ function install(): void {
       snapshot: function () {
         return {
           finished: finished,
+          endTurn: endTurn,
           failed: failed,
           serverStopped: serverStopped,
           userStopped: userStopped,
@@ -410,9 +441,15 @@ function install(): void {
       var frames = frameDecoder.push(chunk);
       for (var i = 0; i < frames.length; i++) flushFrame(frames[i]);
       dispatchStream(extractor.think, extractor.text, extractor.finished);
-      if (extractor.finished && !dispatched) {
+      // ⚠️ 关键修复（2026-10-11）：仅在「整轮结束」（end_turn=true）时立即派发。
+      //    原先用 extractor.finished（=某条消息完成）就派发并锁死 dispatched，
+      //    而实测同一轮里 GPT 会先发一条**纯文字说明**（finished_successfully 但 end_turn=false），
+      //    真正的含 cuckoo 块消息在其后 4+ 秒才到达 → 被永久丢弃。
+      //    未 end_turn 时不派发：交给流关闭（pump 的 r.done 分支）兜底，
+      //    或等后续消息的 end_turn=true。这样不丢内容，也不改动"最终必定派发"的保证。
+      if (extractor.endTurn && !dispatched) {
         dispatched = true;
-        dispatch(extractor.text, resolveStatus(extractor, false), extractor.tokenUsage, extractor.msgIds, null, Object.assign({ path: 'feed-finished-frame' }, extractor.snapshot()));
+        dispatch(extractor.text, resolveStatus(extractor, false), extractor.tokenUsage, extractor.msgIds, null, Object.assign({ path: 'feed-end-turn' }, extractor.snapshot()));
       }
     }
 
@@ -576,9 +613,12 @@ function install(): void {
       var frames = frameDecoder.push(chunk);
       for (var i = 0; i < frames.length; i++) flushFrame(frames[i]);
       dispatchStream(extractor.think, extractor.text, extractor.finished);
-      if (extractor.finished && !dispatched) {
+      // 与 fetch 侧同款修复：仅在「整轮结束」（end_turn=true）时立即派发，
+      // 避免把同一轮中的中间消息（纯文字说明）当最终结果锁死，丢掉后续含 cuckoo 块的消息。
+      // 未 end_turn 时交给 readyState===4 的分支兜底派发。
+      if (extractor.endTurn && !dispatched) {
         dispatched = true;
-        dispatch(extractor.text, resolveStatus(extractor, false), extractor.tokenUsage, extractor.msgIds, null, Object.assign({ path: 'xhr-finished-frame' }, extractor.snapshot()));
+        dispatch(extractor.text, resolveStatus(extractor, false), extractor.tokenUsage, extractor.msgIds, null, Object.assign({ path: 'xhr-end-turn' }, extractor.snapshot()));
       }
     }
 
