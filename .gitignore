@@ -31,6 +31,8 @@ userData/
 # Temp
 *.tmp
 temp/
+# 临时下载/分析产物（如 ChatGPT 网页源码，体积大，不进仓库）
+tmp/
 
 # 打包用的运行时二进制（uv/node，本地下载，不进仓库）
 resources/runtime/
@@ -46,6 +48,8 @@ resources/runtime/
 # .cuckoo/ 下的本地运行时配置（各人不同，不进仓库）
 .cuckoo/mcp.json
 .cuckoo/mcp-state.json
+# 子代理运行时产物（结果文件；本地生成，不进仓库）
+.cuckoo/subagent-results/
 # 各人安装的插件（含大体积模型/资源，不进仓库）
 .cuckoo/plugins/
 
