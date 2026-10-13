@@ -20,6 +20,8 @@ const { app, BrowserWindow, WebContentsView, Menu, dialog, screen, nativeTheme, 
 // ========== 关闭确认 ==========
 /** 已确认关闭的窗口 id（确认后再次触发 close 时直接放行，避免重复弹框） */
 const closeConfirmed = new Set<number>();
+/** 应用退出中（菜单退出 / 自动更新重启）——退出是明确意图，跳过逐窗口关闭确认 */
+let isQuitting = false;
 
 // ========== 持久化会话配置 ==========
 const SESSION_DIR = process.env.CUCKOO_SESSION_DIR || 'cuckoo-ai-pro-session';
@@ -555,6 +557,8 @@ function createWindow(profile: any) {
   // 关闭前记录窗口大小/位置（用 getNormalBounds 取"还原后"尺寸；closed 时窗口已销毁取不到）
   mainWindow.on('close', (e: any) => {
     if (profileData.isSubagent) return; // 子代理窗口：不记录、不弹框
+    // 应用退出中（菜单退出 / 更新重启）：退出是明确意图，不弹框（否则逐窗口弹框会阻塞退出/更新安装）
+    if (isQuitting) return;
     // 未确认关闭 且 非程序主动关闭 → 弹框确认
     if (!closeConfirmed.has(mainWindow.id) && !(mainWindow as any).__programmaticClose) {
       e.preventDefault();
@@ -1322,6 +1326,8 @@ app.on('window-all-closed', () => {
 // 退出前刷新所有 session 数据 + 断开所有 MCP 连接
 let quitFlushed = false;
 app.on('before-quit', (event: any) => {
+  // 应用退出中：置位，让各窗口的 close 处理跳过"确认关闭"弹框（菜单退出 / 自动更新重启）
+  isQuitting = true;
   if (quitFlushed) return;
   event.preventDefault();
   quitFlushed = true;
