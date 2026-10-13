@@ -20,19 +20,19 @@
 
 > 📐 **要改代码 / 做新需求？先读 [架构与开发指南](docs/architecture.md)**（目录结构、依赖规则、构建流程、任务手册）。
 
-它通过 Electron 将 AI 网页版（DeepSeek、Claude 等）嵌入本地窗口，并注入侧边覆盖层。AI 被系统提示词引导生成工具调用（JavaScript 代码块），经用户确认后在本地沙箱中执行，再把结果回传给 AI。整个过程不需要 API Key，不产生 API 调用费用——你用的是网页版账号，而不是按 Token 计费的接口。
+它通过 Electron 将 AI 网页版嵌入本地窗口，并注入侧边覆盖层。AI 被系统提示词引导生成工具调用（JavaScript 代码块），经用户确认后在本地沙箱中执行，再把结果回传给 AI。整个过程不需要 API Key，你用的是网页版账号，而不是按 Token 计费的接口。
 
 ---
 
 ## 核心特性
 
-### 零 Token 成本
+### 丰富网页版AI能力
 
-不调用任何 AI 平台 API，不使用 API Token。直接复用网页版聊天能力，把网页版 AI 变成可执行本地操作的 Agent。
+直接复用网页版聊天能力，把网页版 AI 丰富成可执行本地操作的 Agent。
 
 ### 多平台 Provider 框架
 
-- 内置 **DeepSeek**、**Claude**、**ChatGPT** 三个平台
+- 内置 平台 作为学习demo
 - 每个平台独立封装输入框定位、发送按钮检测、回复完成判断、消息解析等差异
 - 新建窗口时可选择平台，也可**导入自定义 Provider**（提供类型声明和模板，降低扩展门槛）
 
@@ -387,4 +387,8 @@ cuckoo-code/
   - **飞书 Markdown 卡片**：飞书推送 AI 回复改用交互卡片渲染 Markdown（含表格）（PR #35）
 - [@yangjh888](https://github.com/yangjh888)：
   - **ChatGPT 登录态完整适配**：回复拦截重写为三态（finished/stopped/error）、SSE 裸 `{v:[...]}` 增量帧解析修复、`fillInput`（execCommand）+ `triggerSend`（真实 Enter）解决 ProseMirror 输入/发送、Google OAuth 指纹修正（Sec-CH-UA* / userAgentData / webdriver）（PR #47）
+- [@brownie19850318](https://github.com/brownie19850318)：
+  - **ChatGPT 多消息流适配**：修复同一条 SSE 流内多条 assistant 消息场景下，后续含 cuckoo 块的消息被提前锁定丢弃（新增 `endTurn` 区分消息级/整轮结束、`overwriteText` 防正文被覆盖）（PR #49）
+  - **工具执行遮罩支持取消**：工具调用执行期间遮罩显示「停止」按钮，长任务可中途取消（PR #49）
+  - **关窗释放渲染进程**：修复窗口关闭时子视图（WebContentsView）渲染进程不释放（孤儿进程 + 内存泄漏）（PR #49）
 - 所有贡献者和用户
