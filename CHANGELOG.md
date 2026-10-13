@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [0.8.12] - 2026-10-13
+
+### Added
+- **工具执行遮罩支持取消**：工具调用执行期间遮罩显示「停止」按钮，长任务可中途取消。
+- **压缩后上下文交接提示**：长会话压缩后提示 AI 主动读文件补全上下文，避免盲目相信残缺摘要。
+
+### Changed
+- **输入框填入统一改用 `execCommand('insertText')` + 读回校验**：修复合成 `ClipboardEvent('paste')`（`isTrusted=false`）被 ProseMirror 等站点拒收导致的填入静默失败。
+
+### Fixed
+- **ChatGPT 多消息流适配**：修复同一条流内多条 assistant 消息场景下，后续含 cuckoo 块的消息被提前锁定丢弃（表现为「输出了代码块却提示未检测到工具调用」「工具只调一次就不调了」）。新增 `endTurn` 区分消息级/整轮结束，新增 `overwriteText` 防正文被纯文字覆盖。（@brownie19850318，PR #49）
+- **关窗释放渲染进程**：修复窗口关闭时子视图（WebContentsView）渲染进程不释放（孤儿进程 + 内存泄漏）。
+- **webserver** 改用 `createRequire` 加载 electron（与项目其它 IPC 模块风格统一）。
+
 ## [0.8.11] - 2026-10-11
 
 ### Added
