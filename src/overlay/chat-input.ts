@@ -22,18 +22,8 @@ function getCurrentProvider(): any {
  * 生成随机等待时间（ms），范围由 state 配置（默认 2-4 秒）
  */
 function randomDelay(): number {
-  // 优先读 localStorage（主/子窗共享同一 partition 的 localStorage）——子窗未跑主窗 overlay 初始化，
-  // state.sendDelayMin/Max 会停在默认值（2-4s），导致子窗未继承主窗的发送延迟设置。故此处直接读 localStorage。
-  let min: number | undefined;
-  let max: number | undefined;
-  try {
-    const savedMin = localStorage.getItem('cuckoo-send-delay-min');
-    const savedMax = localStorage.getItem('cuckoo-send-delay-max');
-    if (savedMin !== null) { const v = parseInt(savedMin, 10); if (Number.isFinite(v) && v >= 0) min = v; }
-    if (savedMax !== null) { const v = parseInt(savedMax, 10); if (Number.isFinite(v) && v >= 0) max = v; }
-  } catch (_) { /* localStorage 不可用则回退 state/默认 */ }
-  if (min === undefined) min = typeof state.sendDelayMin === 'number' ? state.sendDelayMin : 2000;
-  if (max === undefined) max = typeof state.sendDelayMax === 'number' ? state.sendDelayMax : 4000;
+  const min = typeof state.sendDelayMin === 'number' ? state.sendDelayMin : 2000;
+  const max = typeof state.sendDelayMax === 'number' ? state.sendDelayMax : 4000;
   if (min >= max) return min;
   return Math.floor(Math.random() * (max - min)) + min;
 }
@@ -533,20 +523,6 @@ ipcRenderer.on('initial-prompt', (_event: any, content: string) => {
       console.error('[' + new Date().toISOString() + '] [Cuckoo Code] initial-prompt 处理异常:', e.message);
     }
   }
-});
-
-// 监听子 Agent 提醒（subagent-reminder）：层3 空闲提醒、层5 force_deliver 提示。
-// 对齐 051 preload/dom/chat-input.js L396-404；sendToChat 签名 (msg, tag, fixedDelay)。
-ipcRenderer.on('subagent-reminder', (_event: any, payload: { message?: string } = {}) => {
-  const message = payload && payload.message;
-  if (!message || typeof message !== 'string') return;
-  const input = findInputArea();
-  if (!input) {
-    console.log('[Cuckoo Code] 子 Agent 提醒到达，但未找到输入框');
-    return;
-  }
-  console.log('[Cuckoo Code] 收到 subagent-reminder, 长度=' + message.length);
-  sendToChat(message, '子Agent提醒', 1500);
 });
 }
 

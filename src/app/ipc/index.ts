@@ -13,7 +13,6 @@ import { registerHarnessIpc } from './harness.js';
 import { registerSnippetsIpc } from './snippets.js';
 import { registerSettingsIpc } from './settings.js';
 import { registerFeishuIpc } from './feishu.js';
-import { registerSendDelayIpc } from './send-delay.js';
 import { registerPluginIpc } from './plugin.js';
 import { registerWebServerIpc } from './webserver.js';
 import { registerThemeIpc } from './theme.js';
@@ -37,7 +36,6 @@ function registerIpcHandlers(): void {
   registerSnippetsIpc();
   registerSettingsIpc();
   registerFeishuIpc();
-  registerSendDelayIpc();
   registerPluginIpc();
   registerWebServerIpc();
   registerThemeIpc();

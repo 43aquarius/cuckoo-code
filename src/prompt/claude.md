@@ -164,6 +164,4 @@ log(r);
 
 {{PROJECT_RULES_SECTION}}
 
-{{WORKFLOW_RULES_SECTION}}
-
 ---

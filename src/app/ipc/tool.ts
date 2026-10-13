@@ -4,7 +4,6 @@
 import { createRequire } from 'node:module';
 import * as windowState from '../window.js';
 import { registry as toolRegistry, jsRunner } from '../../tools/index.js';
-import { findTaskByWebContents, markActivity } from '../subagent.js';
 
 const require = createRequire(import.meta.url);
 const { ipcMain } = require('electron');
@@ -23,11 +22,6 @@ export { resetTodosCache };
 function registerToolIpc(): void {
   // 执行工具
   ipcMain.handle('execute-tool', async (event: any, { toolName, params, callId }: any) => {
-    // T2b：子代理活动信号 + force_deliver 后工具门禁（普通窗口 markActivity 返回 false 但不拦截）
-    const subState = findTaskByWebContents(event.sender);
-    if (subState && !markActivity(subState)) {
-      return { callId, success: false, error: '已达到轮次上限，请输出 subagent_result 交付结果' };
-    }
     const ctx = windowState.getContextByWebContents(event.sender);
     const store = ctx ? ctx.sessionStore : null;
     const selectedDir = store ? store.state.selectedProjectDir : null;
@@ -45,11 +39,6 @@ function registerToolIpc(): void {
   ipcMain.handle('execute-js', async (event: any, { code, callId, attachDelayMin, attachDelayMax, ssrfGuard }: any) => {
     if (!code || typeof code !== 'string') {
       return { callId, success: false, error: '无效的 JS 代码' };
-    }
-    // T2b：子代理活动信号 + force_deliver 后工具门禁
-    const subState = findTaskByWebContents(event.sender);
-    if (subState && !markActivity(subState)) {
-      return { callId, success: false, error: '已达到轮次上限，请输出 subagent_result 交付结果' };
     }
     const ctx = windowState.getContextByWebContents(event.sender);
     const store = ctx ? ctx.sessionStore : null;

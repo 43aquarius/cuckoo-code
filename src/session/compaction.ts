@@ -365,8 +365,7 @@ function checkPendingInit(): void {
   console.log('[Cuckoo Compact] 检测到压缩后待初始化，3 秒后执行；项目目录=' + (projectDir || '(无)') + '，压缩前会话=' + (parentSessionId || '(无)'));
   setTimeout(async () => {
     try {
-      // 参数顺序：(projectDir, isCompaction, extraPrompt, noDialog, prependPrompt, isSubagent, parentSessionId)
-      await (window as any).electronAPI.initProject(projectDir || null, true, '', false, '', false, parentSessionId);
+      await (window as any).electronAPI.initProject(projectDir || null, true, '', false, parentSessionId);
     } catch (err) {
       console.error('[Cuckoo Compact] 压缩后初始化失败:', err);
     }

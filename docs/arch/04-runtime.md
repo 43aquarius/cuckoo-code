@@ -63,9 +63,7 @@ src/app/entry.ts
 
 ⑤ 处理回复
    processInterceptedResponse(text)
-     ├── extractJsToolBlocks(text) 有 cuckoo 块：
-     │     ├── [仅子代理窗口] 工具调用门禁：块数 >3 或单块 await 调用 >3 → 整轮不执行 + 发提示（教正确用法）
-     │     └── 通过 → executeJsBlocksWithRetry（遇「代码不完整」错误自动重试，最多 3 次）
+     ├── extractJsToolBlocks(text) 有 cuckoo 块 → 执行工具
      ├── looksLikeJsonToolCall(text) → 发提示让 AI 改用 cuckoo 块
      ├── XML 格式 → 发提示
      └── 纯文本 → 视为任务完成，退出工具循环

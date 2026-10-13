@@ -119,66 +119,6 @@ test('ToolRegistry getPromptSections 排序与过滤', () => {
   assert.strictEqual(new ToolRegistry().getFormattedPromptSections(), '');
 });
 
-
-// ========== M-2 exclude 参数（ToolRegistry）==========
-
-test('getFormattedJsApiForPrompt 按名排除', () => {
-  const r = new ToolRegistry();
-  r.register(new Tool('a', 'A', {}, 'a()'));
-  r.register(new Tool('b', 'B', {}, 'b()'));
-  const out = r.getFormattedJsApiForPrompt(['b']);
-  assert.ok(out.includes('a()'));
-  assert.ok(!out.includes('b()'), '排除的 b 不应出现');
-});
-
-test('getFormattedJsApiForPrompt 缺省 / null / [] 不过滤', () => {
-  const r = new ToolRegistry();
-  r.register(new Tool('a', 'A', {}, 'a()'));
-  r.register(new Tool('b', 'B', {}, 'b()'));
-  assert.ok(r.getFormattedJsApiForPrompt().includes('b()'));
-  assert.ok(r.getFormattedJsApiForPrompt(null).includes('b()'));
-  assert.ok(r.getFormattedJsApiForPrompt([]).includes('b()'));
-});
-
-test('getFormattedJsApiForPrompt 排除全部 -> 暂无可用工具', () => {
-  const r = new ToolRegistry();
-  r.register(new Tool('a', 'A', {}, 'a()'));
-  assert.strictEqual(r.getFormattedJsApiForPrompt(['a']), '暂无可用工具');
-});
-
-test('getFormattedPromptSections 按名排除 section', () => {
-  const r = new ToolRegistry();
-  class A extends Tool {
-    constructor() { super('a', 'A', {}); }
-    getPromptSection() { return { name: 'sec:a', order: 10, text: 'text A' }; }
-  }
-  class B extends Tool {
-    constructor() { super('b', 'B', {}); }
-    getPromptSection() { return { name: 'sec:b', order: 20, text: 'text B' }; }
-  }
-  r.register(new A());
-  r.register(new B());
-  assert.strictEqual(r.getFormattedPromptSections(['b']), 'text A');
-  assert.strictEqual(r.getFormattedPromptSections(['a', 'b']), '');
-});
-
-test('getPromptSections exclude 命中的工具不出现', () => {
-  const r = new ToolRegistry();
-  class A extends Tool {
-    constructor() { super('a', 'A', {}); }
-    getPromptSection() { return { name: 'sec:a', order: 10, text: 'text A' }; }
-  }
-  class B extends Tool {
-    constructor() { super('b', 'B', {}); }
-    getPromptSection() { return { name: 'sec:b', order: 20, text: 'text B' }; }
-  }
-  r.register(new A());
-  r.register(new B());
-  const sections = r.getPromptSections(['a']);
-  assert.strictEqual(sections.length, 1);
-  assert.strictEqual(sections[0].name, 'sec:b');
-});
-
 test('ToolResult success/error/toString', () => {
   const s = ToolResult.success({ a: 1 });
   assert.strictEqual(s.success, true);

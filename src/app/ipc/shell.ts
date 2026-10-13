@@ -132,12 +132,8 @@ function registerShellIpc(): void {
     // 更新系统总累计并广播给所有窗口
     try {
       const ctx = view ? windowState.getContextByWebContents(view.webContents) : null;
-      // 子代理窗口跳过：086 的子代理用独立 profileId（副账号池），
-      // 若照常上报会新增一个键、重复计入系统总累计（cleanupSubagentKeys 的历史 bug 即此）。
-      // 判定统一用 ctx.isSubagent（由 profile.ts 的 isSubagent 字段经 window.ts 透传），
-      // 不再用 id 前缀 'subagent-' 猜测（MI-5：消除两套并存机制）。
-      const isSubagent = !!(ctx && ctx.isSubagent);
-      if (ctx && ctx.profileId && !isSubagent && typeof windowCumulative === 'number') {
+      // 子代理与父窗口共用 profileId，写入的是同一个键（幂等，不会重复累计）。
+      if (ctx && ctx.profileId && typeof windowCumulative === 'number') {
         setWindowCumulative(ctx.profileId, windowCumulative);
         broadcastSystemTotal();
       }

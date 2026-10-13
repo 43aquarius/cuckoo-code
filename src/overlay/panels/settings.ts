@@ -4,9 +4,6 @@
  */
 import { showToast } from '../panel.js';
 import { state } from '../state.js';
-import { createRequire } from 'node:module';
-const require = createRequire(import.meta.url);
-const { ipcRenderer } = require('electron');
 
 /** 打开设置弹窗：从 localStorage 加载配置到输入框 */
 function openSettings() {
@@ -61,8 +58,6 @@ function resetSettings() {
   } catch (_) {}
   state.sendDelayMin = 2000;
   state.sendDelayMax = 4000;
-  // 同步到主进程（中心化）——恢复默认也要同步，否则子窗仍取到旧的已放弃自定义值
-  try { ipcRenderer.send('save-global-send-delay', { min: 2000, max: 4000 }); } catch (_) {}
   showToast('已恢复默认设置', 2500);
   openSettings(); // 重新加载默认值到输入框
 }
@@ -116,8 +111,6 @@ function saveSettings() {
     localStorage.setItem('cuckoo-send-delay-max', String(smax));
     localStorage.setItem('cuckoo-attach-delay-min', String(amin));
     localStorage.setItem('cuckoo-attach-delay-max', String(amax));
-    // 同步到主进程（中心化）——供子窗（不同 partition）读取
-    try { ipcRenderer.send('save-global-send-delay', { min: smin, max: smax }); } catch (_) {}
   } catch (_) {}
   state.sendDelayMin = smin;
   state.sendDelayMax = smax;
@@ -242,8 +235,6 @@ function applySettingsData(data: any): { success: boolean; error?: string } {
     localStorage.setItem('cuckoo-send-delay-max', String(smax));
     localStorage.setItem('cuckoo-attach-delay-min', String(amin));
     localStorage.setItem('cuckoo-attach-delay-max', String(amax));
-    // 同步到主进程（中心化）——供子窗（不同 partition）读取
-    try { ipcRenderer.send('save-global-send-delay', { min: smin, max: smax }); } catch (_) {}
     if (goalMax !== null) localStorage.setItem('cuckoo-goal-max-iterations', String(goalMax));
     // ssrfGuard 仅当显式提供时才写（避免未传该字段的调用方把它清成 0）
     if (data && data.ssrfGuard !== undefined) localStorage.setItem('cuckoo-ssrf-guard', data.ssrfGuard ? '1' : '0');
@@ -268,8 +259,6 @@ function resetSettingsData(): SettingsData {
   try { for (const k of KEYS) localStorage.removeItem(k); } catch (_) {}
   state.sendDelayMin = 2000;
   state.sendDelayMax = 4000;
-  // 同步到主进程（中心化）——恢复默认也要同步，否则子窗仍取到旧的已放弃自定义值
-  try { ipcRenderer.send('save-global-send-delay', { min: 2000, max: 4000 }); } catch (_) {}
   return getSettingsData();
 }
 

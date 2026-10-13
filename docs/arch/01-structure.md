@@ -50,9 +50,8 @@
 |---|---|
 | `entry.ts` | preload 入口：注入 hook、注册 IPC、回调接线、初始化覆盖层 |
 | `api.ts` | `contextBridge` 暴露 `window.electronAPI`（所有 IPC 的渲染侧封装） |
-| `intercept/observer.ts` | 监听 `cuckoo-ai-response/error` 事件，分派处理；对外提供 `onInterceptedResponse`/`onAiError`/`setSubagentActive`。含子代理工具调用门禁（块数 >3 / 单块 await 调用 >3 → 整轮不执行 + 提示） |
-| `subagent.ts` | 子代理窗口逻辑：读 `--cuckoo-subagent` 配置、监听回复、上报结果；激活时置 observer 子代理标识（供门禁判定） |
-| `parser/js-detector.ts` | 检测并提取 `cuckoo` / js 代码块（AI 的 JS 工具调用）；提供 `countAwaitCalls` 统计块内工具调用数 |
+| `intercept/observer.ts` | 监听 `cuckoo-ai-response/error` 事件，分派处理；对外提供 `onInterceptedResponse`/`onAiError` |
+| `parser/js-detector.ts` | 检测并提取 `cuckoo` / js 代码块（AI 的 JS 工具调用） |
 | `parser/json-detector.ts` | **仅识别** JSON 格式工具调用（D11 已废除执行，检测到发提示） |
 | `loop/executor.ts` | 执行 JS 工具脚本，渲染结果到面板 |
 | `loop/watchdog.ts` | 工具循环看门狗：等回复超时则催"请继续" |

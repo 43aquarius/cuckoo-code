@@ -22,7 +22,6 @@ import { loadSettings } from './pages/settings.js';
 import { renderRecent } from './recent.js';
 import { loadConversations } from './pages/conversations.js';
 import { loadPlugins } from './pages/plugins.js';
-import { loadSubagents, initSubagents } from './pages/subagents.js';
 import { initPluginShell } from './plugin-shell.js';
 import { initThemePresenter } from './theme-presenter.js';
 
@@ -31,12 +30,7 @@ registerTab('workspaces', loadWorkspaces);
 registerTab('files', loadFiles);
 registerTab('snippets', loadSnippets);
 registerTab('skills', loadSkills);
-// 「子代理」页 = 运行中任务（融合自原「运行中子代理」页）+ 代理定义列表，
-// 二者合为一个侧栏标签，避免出现两个「子代理」图标。
-registerTab('agents', () => {
-  void loadSubagents();
-  void loadAgents();
-});
+registerTab('agents', loadAgents);
 registerTab('mcp', loadMcpServers);
 registerTab('token', loadAutoCompact);
 registerTab('about', loadAbout);
@@ -59,9 +53,6 @@ try { initPluginShell(); } catch (_) { /* ignore */ }
 
 // 主题呈现层（消费主进程快照，写 --ck-* 变量）
 try { initThemePresenter(); } catch (_) { /* ignore */ }
-
-// 运行中子代理：订阅主进程 push（有任务即推、无任务即停）
-try { initSubagents(); } catch (_) { /* ignore */ }
 
 // 上报壳页面真实可视尺寸（主进程据此精确布局，避免菜单栏高度误差盖住状态栏）
 function reportShellSize(): void {

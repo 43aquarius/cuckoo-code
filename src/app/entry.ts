@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Cuckoo Code 主进程入口（多窗口多 profile 版）
  * 由项目根目录 main.js 薄壳加载。
  */
@@ -53,7 +53,7 @@ if (RENDERER_LOG_DIR) {
 import { registerIpcHandlers } from './ipc/index.js';
 import { buildChromeUserAgent, buildClientHintsHeaders } from '../infra/user-agent.js';
 import { initFeishu } from './ipc/feishu.js';
-import { injectSubagentDeps, setStatusChangeHandler, getStatusList, runAgent as runAgentImpl } from './subagent.js';
+import { injectSubagentDeps, runAgent as runAgentImpl } from './subagent.js';
 import { injectAgentRunner, injectSubagentChecker } from '../tools/impl/run-agent.js';
 import { injectGoalDonePusher } from '../tools/impl/goal-done.js';
 import { isSubagentWindow, pushGoalDone } from './goal.js';
@@ -159,28 +159,10 @@ function createWindow(profile: any) {
     mainWindow.on('unmaximize', () => { try { mainWindow.setBounds(mainWindow.getBounds()); } catch (_) {} });
   } catch (_) { /* ignore */ }
 
-  // 子代理配置：写临时文件，argv 只传文件路径（供子代理窗口自识别）。
-  // 【修复 2026-10-03】原走 '--cuckoo-subagent=' + encodeURIComponent(JSON) —— 大 systemPrompt
-  //   （中文经 encodeURIComponent 膨胀约 9 倍）+ task 使命令行超 Windows 32767 上限 → 子进程
-  //   spawn 失败 → observer-ready 握手超时。改传文件路径（短），配置体量不再受限。
-  let subagentArg: string | null = null;
-  // 【修复 2026-10-07 · 临时文件泄漏】把 cfg 文件路径提升到函数作用域，供 closed 回调清理
-  //   （原 cfgFile 是块内 const，closed 时无法删 → %TEMP%\cuckoo-subagent-cfg 累计不回收）。
-  let subagentCfgFile: string | null = null;
-  if (profileData.subagentConfig) {
-    try {
-      const cfgDir = path.join(app.getPath('temp'), 'cuckoo-subagent-cfg');
-      fs.mkdirSync(cfgDir, { recursive: true });
-      const cfgFile = path.join(cfgDir, profileData.id + '.json');
-      fs.writeFileSync(cfgFile, JSON.stringify(profileData.subagentConfig), 'utf-8');
-      subagentCfgFile = cfgFile;
-      subagentArg = '--cuckoo-subagent-file=' + cfgFile;
-    } catch (err: any) {
-      // 兜底：写文件失败则回退内联（短配置可用；长配置仍可能超限，但至少可见）
-      console.error('[Cuckoo Code] 子代理配置文件写入失败，回退命令行内联:', err && err.message);
-      subagentArg = '--cuckoo-subagent=' + encodeURIComponent(JSON.stringify(profileData.subagentConfig));
-    }
-  }
+  // 子代理配置：序列化后经 additionalArguments 传给 bridge（供子代理窗口自识别）
+  const subagentArg = profileData.subagentConfig
+    ? '--cuckoo-subagent=' + encodeURIComponent(JSON.stringify(profileData.subagentConfig))
+    : null;
 
   // AI 页面视图（复用现有 bridge preload；与壳共用 partition）
   const view = new WebContentsView({
@@ -619,34 +601,40 @@ function createWindow(profile: any) {
     windowState.removeWindow(mainWindow.id);
     // 释放该窗口持有的 MCP 连接引用 + 清理自动连记录
     try { mcpClient.forgetWindow(mainWindow.id); } catch (_) {}
-    // 【修复 2026-10-07 · WebContentsView 渲染进程泄漏】
-    //   背景：本窗为「壳 BrowserWindow + AI 页 WebContentsView(+懒加载 harnessView)」双层结构。
+    // 【修复渲染进程泄漏】本窗为「壳 BrowserWindow + AI 页 WebContentsView(+懒加载 harnessView)」双层结构。
     //   win.close() 只销毁壳窗口的 webContents；挂在 contentView 上的子 view 独立持有渲染进程，
-    //   不会被连带销毁 → 每次子代理任务留下一个孤儿渲染进程（实测 120 任务 = 120 孤儿 + 275MB）。
+    //   不会被连带销毁 → 每关一个窗口留下一个孤儿渲染进程（实测 120 任务 = 120 孤儿 + 275MB）。
     //   收口：显式 removeChildView（从壳摘除）+ webContents.close()（真正释放渲染进程）。
-    //   次序：先摘除（须壳未销毁）再 close；异常不抛（吞掉，不阻断后续清理）。
-    // 1) 从壳的 contentView 摘除两个子视图（壳已销毁则跳过——销毁时子视图随宿主释放）
-    //    （view / harnessView 均为本 createWindow 函数级变量，闭包可见；harnessView 懒加载，未用则为 null）
+    //   次序：先摘除（须壳未销毁）再 close；异常吞掉，不阻断后续清理。
     try {
       if (!mainWindow.isDestroyed() && mainWindow.contentView) {
         if (view) mainWindow.contentView.removeChildView(view);
         if (harnessView) mainWindow.contentView.removeChildView(harnessView);
       }
     } catch (_) { /* ignore */ }
-    // 2) 销毁子视图 webContents（关键：close 才释放渲染进程，win.close() 不会连带）
     for (const v of [view, harnessView]) {
       try {
         const wc = v && v.webContents;
         if (wc && !wc.isDestroyed()) wc.close();
       } catch (_) { /* ignore */ }
     }
-    // 3) 删除本次子代理的 cfg 临时文件（原只写不删 → %TEMP% 累计；项目已有 7 天清理机制，此处即时删更稳）
-    try {
-      if (subagentCfgFile) fs.unlinkSync(subagentCfgFile);
-    } catch (_) { /* 文件可能已被清理，忽略 */ }
   });
 
   return mainWindow.id;
+}
+
+// ========== 子代理窗口 ==========
+/**
+ * 创建子代理窗口（复用父窗口 partition → 免登录 + token 计入同一"窗口"）。
+ * @param parentProfileId 父窗口 profile id
+ * @param agentName 代理名（用于窗口标题）
+ * @returns 子代理窗口的 windowId
+ */
+function createSubagentWindow(parentProfileId: string, agentName: string): number {
+  const parent = profileManager.getProfileById(parentProfileId);
+  if (!parent) throw new Error('父 profile 不存在: ' + parentProfileId);
+  const sub = profileManager.createSubagentProfile(parent, agentName);
+  return createWindow(sub);
 }
 
 // ========== 应用菜单 ==========
@@ -801,6 +789,7 @@ injectAgentRunner(async ({ agent, task, currentWindowId }: any) => {
   const ctx = windowState.getWindowContext(currentWindowId);
   if (!ctx) throw new Error('父窗口上下文不存在');
   return runAgentImpl({
+    parentProfileId: ctx.profileId,
     parentWindowId: currentWindowId,
     agentName: agent.name,
     task,
@@ -999,37 +988,6 @@ ipcMainForProfile.handle('rate-limit-hit', async (event: any) => {
 
 // ========== IPC 处理器 ==========
 registerIpcHandlers();
-
-// ========== 子代理状态推送（T10，对齐 051 main/index.js L347-383）==========
-// 事件驱动：任务注册表变更时通知 → 有任务则 1s ticker 推送 getStatusList() 到所有壳窗口；
-// 无任务即推空列表并停 ticker。排除子代理窗口（子窗口不应显示自己的任务条目）。
-let _statusTicker: NodeJS.Timeout | null = null;
-function broadcastSubagentStatus(tasks: any[]): void {
-  for (const ctx of windowState.getAllContexts()) {
-    if (ctx.isSubagent) continue;
-    const win = ctx.win;
-    if (!win || win.isDestroyed()) continue;
-    try { win.webContents.send('subagent-status', { tasks }); } catch (_) { /* ignore */ }
-  }
-}
-setStatusChangeHandler((tasks) => {
-  if (tasks.length > 0) {
-    broadcastSubagentStatus(tasks);
-    if (!_statusTicker) {
-      _statusTicker = setInterval(() => {
-        const cur = getStatusList();
-        broadcastSubagentStatus(cur);
-        if (cur.length === 0) {
-          clearInterval(_statusTicker as any);
-          _statusTicker = null;
-        }
-      }, 1000);
-    }
-  } else {
-    broadcastSubagentStatus([]);
-    if (_statusTicker) { clearInterval(_statusTicker); _statusTicker = null; }
-  }
-});
 
 // ========== 飞书同步（若已配置启用则自动连接）==========
 try { initFeishu(); } catch (err: any) { console.error('[Feishu] 初始化失败:', err.message); }

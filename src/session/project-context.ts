@@ -54,12 +54,10 @@ function logWithFile(providerId: string, msg: string): void {
  * @param windowContext 窗口上下文
  * @param presetDir 预设项目目录（如压缩后自动初始化）。提供时跳过目录选择对话框。
  * @param isCompaction 是否为压缩后初始化（末尾追加"请继续你之前的工作"）
- * @param extraPrompt 追加到提示词末尾的额外内容（子代理用它带上"协议段 + 任务"）
+ * @param extraPrompt 追加到提示词末尾的额外内容（子代理用它带上"代理系统提示 + 任务"）
  * @param noDialog 为 true 时不弹目录选择框（子代理场景：目录取不到就用空值继续）
- * @param prependPrompt 置于提示词最前的内容（子代理角色段：身份锚定必须在 base 之前）
- * @param isSubagent 子代理窗口标志（不注入 CUCKOO.md）
  */
-async function initProject(skipPrompt: boolean = false, windowContext: any = null, presetDir: string | null = null, isCompaction: boolean = false, extraPrompt: string = '', noDialog: boolean = false, prependPrompt: string = '', isSubagent: boolean = false, parentSessionId: string | null = null): Promise<any> {
+async function initProject(skipPrompt: boolean = false, windowContext: any = null, presetDir: string | null = null, isCompaction: boolean = false, extraPrompt: string = '', noDialog: boolean = false, parentSessionId: string | null = null): Promise<any> {
   const ctx = windowContext || windowState.getMainContext();
   const mainWindow = ctx ? ctx.win : windowState.getMainWindow();
   // AI 页面在 WebContentsView 中（壳窗口的 win.webContents 是地址栏壳页面）
@@ -161,18 +159,14 @@ async function initProject(skipPrompt: boolean = false, windowContext: any = nul
   }
 
   // 组装提示词（模板读取 + 占位符填充 + MCP/平台/项目章节）
-  const built = buildPrompt({ providerId, selectedDir, isCompaction, isSubagent });
+  const built = buildPrompt({ providerId, selectedDir, isCompaction });
   if (built.error) {
     return { success: false, message: built.error };
   }
   stepLog('提示词组装完成');
 
   let combined = built.prompt;
-  // 子代理首条消息三段式：角色段（prepend）置最前，base 居中，协议段（extraPrompt）置末
-  if (prependPrompt) {
-    combined = prependPrompt + '\n\n---\n\n' + combined;
-  }
-  // 子代理等场景：在完整系统提示词末尾追加"协议段 + 任务"
+  // 子代理等场景：在完整系统提示词末尾追加"代理系统提示 + 任务"
   if (extraPrompt) {
     combined += '\n\n---\n\n' + extraPrompt;
   }

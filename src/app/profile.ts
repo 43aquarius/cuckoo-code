@@ -152,20 +152,18 @@ function updateProfileProvider(id: string, providerId: string): any {
 }
 
 /**
- * 创建子代理窗口的临时 profile。
- * 关键：partition 复用【选定的池账号】的（独立 partition + 免登录），
- * 与主账号分离，避免同账号并发触发平台限流（429）。
+ * 创建子代理窗口的 profile（"父窗口的分身"）。
+ * 关键：**复用父 profile 的 id + partition** —— 这样：
+ *  - 会话账本 / token 统计 / 设置 全部与父窗口共用（数据能存、能累计）
+ *  - 靠 isSubagent 标志区分"这是分身"（防递归、窗口管理用）
  * 该 profile 不写入 profile-list.json（窗口关闭即弃）。
- * @param account 选定的池账号 profile（决定 partition / providerId）
- * @param agentName 代理名（窗口标题用）
  */
-function createSubagentProfile(account: any, agentName: string): any {
-  if (!account) throw new Error('createSubagentProfile: account 不能为空');
+function createSubagentProfile(parent: any, agentName: string): any {
   return {
-    id: 'subagent-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
-    providerId: account.providerId,
+    id: parent.id,               // 复用父 profileId（共用账本/token/设置）
+    providerId: parent.providerId,
     name: '子代理: ' + (agentName || 'agent'),
-    partition: account.partition, // 复用池账号 partition（独立于主账号）
+    partition: parent.partition, // 复用父窗口 partition（同一"用户"）
     isSubagent: true,
     createdAt: new Date().toISOString(),
   };

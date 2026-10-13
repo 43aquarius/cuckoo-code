@@ -358,15 +358,6 @@
   }
   .ck-list-item:hover { background: var(--ck-primary-soft); }
   .ck-list-empty { color: var(--ck-text-dim); font-size: 12px; text-align: center; padding: 16px 0; }
-  /* 运行中子代理条目：非点击行（操作按钮独立），光标恢复默认 */
-  .ck-sa-item { cursor: default; display: flex; flex-direction: column; gap: 8px; }
-  .ck-sa-top { display: flex; align-items: baseline; gap: 8px; }
-  .ck-sa-name { flex: 1; min-width: 0; font-weight: 600; color: var(--ck-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .ck-sa-provider { font-size: 10.5px; color: var(--ck-text-dim); flex-shrink: 0; }
-  .ck-sa-elapsed { font-family: "SF Mono", "Consolas", monospace; font-size: 11.5px; color: var(--ck-text-2); flex-shrink: 0; }
-  .ck-sa-actions { display: flex; gap: 6px; }
-  .ck-mini-danger { background: rgba(229,72,77,0.1); color: var(--ck-danger); }
-  .ck-mini-danger:hover { background: var(--ck-danger); color: #fff; }
   /* 快速提示词/技�?MCP/窗口：详情默认隐藏，鼠标悬停才显示（逐渐变高动画�?*/
   .ck-snip-item .ck-snip-preview,
   .ck-skill-item .ck-skill-desc,
@@ -1517,7 +1508,7 @@
               </div>
             </div>
 
-            <!-- ===== 子代理（运行中任务 + 代理定义管理）===== -->
+            <!-- ===== 子代理 ===== -->
             <div class="ck-tab" data-panel="agents">
               <div class="ck-actions">
                 <button class="ck-btn ck-btn-anim" id="agent-new">
@@ -1528,12 +1519,6 @@
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
                 </button>
               </div>
-              <!-- 运行中任务（融合原「运行中子代理」页）：有任务才显示，无任务整块隐藏 -->
-              <div id="sa-running-block" style="display:none">
-                <div class="ck-mcp-group-title">运行中</div>
-                <div class="ck-list" id="subagent-list"></div>
-              </div>
-              <div class="ck-mcp-group-title">代理定义</div>
               <div class="ck-list" id="agent-list">
                 <div class="ck-list-empty">加载中…</div>
               </div>
@@ -3424,93 +3409,6 @@
 
   // src/ui/shell/scripts/pages/agents.ts
   init_shared();
-
-  // src/ui/shell/scripts/pages/subagents.ts
-  init_shared();
-  var lastSubagentSig = null;
-  function formatElapsed(ms) {
-    const totalSec = Math.floor((ms || 0) / 1e3);
-    const m = String(Math.floor(totalSec / 60)).padStart(2, "0");
-    const s = String(totalSec % 60).padStart(2, "0");
-    return m + ":" + s;
-  }
-  function setRunningVisible(visible) {
-    const block = document.getElementById("sa-running-block");
-    if (block) block.style.display = visible ? "" : "none";
-  }
-  function renderSubagentTasks(tasks) {
-    const listEl2 = document.getElementById("subagent-list");
-    if (!listEl2) return;
-    tasks = tasks || [];
-    setRunningVisible(tasks.length > 0);
-    const sig = tasks.map((t) => t.taskId + "|" + (t.agentType || "") + "|" + (t.provider || "") + "|" + t.windowId).join(",");
-    if (sig === lastSubagentSig) {
-      updateSubagentElapsed(tasks);
-      return;
-    }
-    lastSubagentSig = sig;
-    if (tasks.length === 0) {
-      listEl2.innerHTML = "";
-      return;
-    }
-    listEl2.innerHTML = tasks.map(
-      (t) => '<div class="ck-list-item ck-sa-item"><div class="ck-sa-top"><span class="ck-sa-name">' + escapeHtml(t.agentType || "\u901A\u7528") + '</span><span class="ck-sa-provider">' + escapeHtml(t.provider || "-") + '</span><span class="ck-sa-elapsed">' + formatElapsed(t.elapsedMs) + '</span></div><div class="ck-sa-actions"><button class="ck-mini-btn" data-act="focus" data-window-id="' + t.windowId + '">\u5207\u6362</button><button class="ck-mini-btn ck-mini-danger" data-act="abort" data-window-id="' + t.windowId + '">\u4E2D\u6B62</button></div></div>'
-    ).join("");
-    listEl2.querySelectorAll("button[data-act]").forEach((btn) => {
-      btn.addEventListener("click", async (e) => {
-        e.stopPropagation();
-        const wid = Number(btn.dataset.windowId);
-        if (btn.dataset.act === "focus") {
-          try {
-            if (api.focusSubagentWindow) await api.focusSubagentWindow(wid);
-          } catch (_) {
-          }
-          return;
-        }
-        if (!await ckConfirm("\u786E\u5B9A\u4E2D\u6B62\u8BE5\u5B50\u4EE3\u7406\u4EFB\u52A1\uFF1F")) return;
-        try {
-          if (api.subagentAbort) await api.subagentAbort(wid);
-        } catch (_) {
-        }
-      });
-    });
-  }
-  function updateSubagentElapsed(tasks) {
-    const listEl2 = document.getElementById("subagent-list");
-    if (!listEl2) return;
-    const map = {};
-    (tasks || []).forEach((t) => {
-      map[t.windowId] = t.elapsedMs;
-    });
-    listEl2.querySelectorAll(".ck-sa-item").forEach((item) => {
-      const btn = item.querySelector("button[data-act]");
-      if (!btn) return;
-      const wid = Number(btn.dataset.windowId);
-      const el = item.querySelector(".ck-sa-elapsed");
-      if (el && map[wid] != null) el.textContent = formatElapsed(map[wid]);
-    });
-  }
-  async function loadSubagents() {
-    if (!api.getSubagentStatus) return;
-    let tasks = [];
-    try {
-      const r = await api.getSubagentStatus();
-      if (r && r.success) tasks = r.tasks || [];
-    } catch (_) {
-    }
-    renderSubagentTasks(tasks);
-  }
-  function initSubagents() {
-    if (api.onSubagentStatus) {
-      api.onSubagentStatus((data) => renderSubagentTasks(data && data.tasks || []));
-    }
-    const saRefreshBtn = document.getElementById("sa-refresh");
-    if (saRefreshBtn) saRefreshBtn.addEventListener("click", () => {
-      void loadSubagents();
-    });
-  }
-
-  // src/ui/shell/scripts/pages/agents.ts
   async function loadAgents() {
     const listEl2 = document.getElementById("agent-list");
     if (!listEl2 || !api.listAgents) return;
@@ -3607,10 +3505,7 @@
   }
   document.getElementById("agent-new")?.addEventListener("click", openAgentModal);
   document.getElementById("agent-cancel")?.addEventListener("click", closeAgentModal);
-  document.getElementById("agent-refresh")?.addEventListener("click", () => {
-    void loadAgents();
-    void loadSubagents();
-  });
+  document.getElementById("agent-refresh")?.addEventListener("click", loadAgents);
   document.getElementById("agent-open-file")?.addEventListener("click", async () => {
     if (!agentEditPath || !api.openAgentFile) return;
     try {
@@ -5149,10 +5044,7 @@
   registerTab("files", loadFiles);
   registerTab("snippets", loadSnippets);
   registerTab("skills", loadSkills);
-  registerTab("agents", () => {
-    void loadSubagents();
-    void loadAgents();
-  });
+  registerTab("agents", loadAgents);
   registerTab("mcp", loadMcpServers);
   registerTab("token", loadAutoCompact);
   registerTab("about", loadAbout);
@@ -5183,10 +5075,6 @@
   }
   try {
     initThemePresenter();
-  } catch (_) {
-  }
-  try {
-    initSubagents();
   } catch (_) {
   }
   function reportShellSize() {

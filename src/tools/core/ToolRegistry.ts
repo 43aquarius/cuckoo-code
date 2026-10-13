@@ -66,9 +66,8 @@ class ToolRegistry {
     return Array.from(this.tools.keys());
   }
 
-  getFormattedJsApiForPrompt(exclude?: string[] | null): string {
-    const ex = exclude && exclude.length ? new Set(exclude) : null;
-    const descriptions = this.getDescriptions().filter((t) => t.jsApi && (!ex || !ex.has(t.name)));
+  getFormattedJsApiForPrompt(): string {
+    const descriptions = this.getDescriptions().filter((t) => t.jsApi);
     if (descriptions.length === 0) return '暂无可用工具';
 
     return descriptions.map((t, i) => {
@@ -77,11 +76,9 @@ class ToolRegistry {
     }).join('\n');
   }
 
-  getPromptSections(exclude?: string[] | null): PromptSection[] {
-    const ex = exclude && exclude.length ? new Set(exclude) : null;
+  getPromptSections(): PromptSection[] {
     const sections: PromptSection[] = [];
     for (const tool of this.tools.values()) {
-      if (ex && ex.has(tool.name)) continue;
       const section = tool.getPromptSection();
       if (section && typeof section.text === 'string' && section.text.trim().length > 0) {
         sections.push({
@@ -95,8 +92,8 @@ class ToolRegistry {
     return sections;
   }
 
-  getFormattedPromptSections(exclude?: string[] | null): string {
-    const sections = this.getPromptSections(exclude);
+  getFormattedPromptSections(): string {
+    const sections = this.getPromptSections();
     if (sections.length === 0) return '';
     return sections.map(s => s.text).join('\n\n');
   }
